@@ -15,6 +15,7 @@ Usage:
     python src/fetch_power.py
 """
 
+import datetime
 import time
 
 import requests
@@ -26,13 +27,47 @@ from config import (
 
 TILES = generate_tiles()
 
+# NASA POWER publishes with a short lag -- the last few days are never
+# available yet. For the current (or a future) year, cap the requested
+# end date instead of asking for days that don't exist.
+POWER_LAG_DAYS = 7
+
+
+def _year_bounds(year: int) -> tuple[str, str]:
+    """Full calendar year as (start, end) in YYYYMMDD, capped so an
+    in-progress year is never requested (and cached) as if it were
+    complete."""
+    today = datetime.date.today()
+    start = datetime.date(year, 1, 1)
+    end = datetime.date(year, 12, 31)
+
+    latest_available = today - datetime.timedelta(days=POWER_LAG_DAYS)
+    if end > latest_available:
+        end = latest_available
+
+    if start > end:
+        raise ValueError(
+            f"Year {year} has no available data yet (latest POWER data "
+            f"is {latest_available.isoformat()}). Remove it from "
+            "config.py's END_YEAR until enough days have passed, or "
+            "this run will cache an empty/partial file as if it were "
+            "final."
+        )
+
+    return start.strftime("%Y%m%d"), end.strftime("%Y%m%d")
+
 
 def fetch_one(param: str, year: int, tile_idx: int, box) -> None:
     lat_min, lat_max, lon_min, lon_max = box
-    out = POWER_CACHE / f"{param}_{year}_tile{tile_idx}.csv"
+
+    is_partial_year = year == datetime.date.today().year
+    suffix = "_partial" if is_partial_year else ""
+    out = POWER_CACHE / f"{param}_{year}_tile{tile_idx}{suffix}.csv"
     if out.exists():
         print(f"  skip {out.name} (already cached)")
         return
+
+    start_str, end_str = _year_bounds(year)
 
     params = {
         "parameters": param,
@@ -41,10 +76,19 @@ def fetch_one(param: str, year: int, tile_idx: int, box) -> None:
         "latitude-max": lat_max,
         "longitude-min": lon_min,
         "longitude-max": lon_max,
-        "start": f"{year}0918",
-        "end": f"{year}0918",
+        # Full calendar year -- NOT a single day. build_panel.py's
+        # rolling 7/14/30-day features need a continuous daily series;
+        # a one-day range here would make those windows meaningless.
+        # Capped by _year_bounds() so the current year isn't requested
+        # past the days POWER has actually published.
+        "start": start_str,
+        "end": end_str,
         "format": "CSV",
     }
+    if is_partial_year:
+        print(f"  note: {year} is still in progress -- only fetching "
+              f"through {end_str}, cached with a '_partial' suffix so "
+              "it's easy to spot and re-fetch once the year is complete.")
 
     print(f"  fetching {param} {year} tile{tile_idx} "
           f"[{lat_min},{lat_max}] x [{lon_min},{lon_max}] ...", end=" ", flush=True)

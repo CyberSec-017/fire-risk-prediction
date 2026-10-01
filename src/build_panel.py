@@ -15,13 +15,19 @@ Usage:
     python src/build_panel.py
 """
 
+import datetime
+
 import numpy as np
 import pandas as pd
 
 from config import (
     PARAMETERS, START_YEAR, END_YEAR,
     POWER_CACHE, FIRES_DAILY, FIRE_PANEL,
+    generate_tiles,
 )
+
+TILES = generate_tiles()
+CURRENT_YEAR = datetime.date.today().year
 
 
 # ---------------------------------------------------------------------------
@@ -58,12 +64,31 @@ def _parse_power_csv(path, param: str) -> pd.DataFrame:
 
 
 def load_power() -> pd.DataFrame:
+    """
+    fetch_power.py caches one file per (param, year, tile):
+    '{param}_{year}_tile{tile_idx}.csv'. For each param we read every
+    year x tile file and concatenate them (tiles cover disjoint areas,
+    so this just stacks rows -- it's not a merge across tiles).
+    """
     merged = None
     for param in PARAMETERS:
-        pieces = [
-            _parse_power_csv(POWER_CACHE / f"{param}_{y}.csv", param)
-            for y in range(START_YEAR, END_YEAR + 1)
-        ]
+        pieces = []
+        for year in range(START_YEAR, END_YEAR + 1):
+            suffix = "_partial" if year == CURRENT_YEAR else ""
+            for tile_idx in range(len(TILES)):
+                path = POWER_CACHE / f"{param}_{year}_tile{tile_idx}{suffix}.csv"
+                if not path.exists():
+                    raise FileNotFoundError(
+                        f"{path} not found. Run fetch_power.py first, or check "
+                        "that config.py's date range / tile layout hasn't "
+                        "changed since the cache was downloaded."
+                    )
+                if suffix:
+                    print(f"  note: using partial {year} data (year still "
+                          "in progress) -- rolling features near the end "
+                          "of the series will have less history to draw on.")
+                pieces.append(_parse_power_csv(path, param))
+
         one = pd.concat(pieces, ignore_index=True)
         merged = one if merged is None else merged.merge(
             one, on=["lat_cell", "lon_cell", "date"], how="outer"
