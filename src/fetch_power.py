@@ -5,17 +5,27 @@ Downloads NASA POWER daily weather data for the whole study area.
 
 NASA POWER's regional endpoint caps requests at roughly 4.5 x 4.5 degrees
 (~100 grid points) -- a bigger box returns HTTP 422 regardless of the date
-range. So instead of one request per (parameter, year), we tile the study
-area into sub-boxes under that limit and fetch each tile separately. Every
-(parameter, year, tile) response is cached to its own CSV under
-data/raw/power_cache/, and re-running this script skips files that already
-exist, so it's safe to resume after a timeout or an error.
+range. So the study area is tiled into sub-boxes under that limit and each
+tile is fetched separately. Every (parameter, year, tile) response is cached
+to its own CSV under data/raw/power_cache/, and re-running this script skips
+files that already exist, so it is safe to resume after a timeout or error.
+
+Improvements over the first version:
+  - automatic retries with back-off (network errors, HTTP 429 / 5xx)
+  - a response is cached ONLY if it really is a POWER CSV (-END HEADER-)
+  - files are written atomically (no half-written CSV if the script is killed)
+  - a final summary lists every failed download and exits with code 1,
+    so a missing tile is never silent
+  - --refresh-partial re-downloads the in-progress year
 
 Usage:
     python src/fetch_power.py
+    python src/fetch_power.py --refresh-partial
 """
 
+import argparse
 import datetime
+import sys
 import time
 
 import requests
@@ -28,15 +38,18 @@ from config import (
 TILES = generate_tiles()
 
 # NASA POWER publishes with a short lag -- the last few days are never
-# available yet. For the current (or a future) year, cap the requested
-# end date instead of asking for days that don't exist.
+# available yet.
 POWER_LAG_DAYS = 7
+
+MAX_RETRIES = 4          # attempts per file
+REQUEST_TIMEOUT = 300    # seconds
+PAUSE_BETWEEN = 1.0      # seconds, be polite with the API
+RETRY_STATUS = {429, 500, 502, 503, 504}
 
 
 def _year_bounds(year: int) -> tuple[str, str]:
     """Full calendar year as (start, end) in YYYYMMDD, capped so an
-    in-progress year is never requested (and cached) as if it were
-    complete."""
+    in-progress year is never requested as if it were complete."""
     today = datetime.date.today()
     start = datetime.date(year, 1, 1)
     end = datetime.date(year, 12, 31)
@@ -48,76 +61,115 @@ def _year_bounds(year: int) -> tuple[str, str]:
     if start > end:
         raise ValueError(
             f"Year {year} has no available data yet (latest POWER data "
-            f"is {latest_available.isoformat()}). Remove it from "
-            "config.py's END_YEAR until enough days have passed, or "
-            "this run will cache an empty/partial file as if it were "
-            "final."
+            f"is {latest_available.isoformat()}). Lower END_YEAR in config.py."
         )
-
     return start.strftime("%Y%m%d"), end.strftime("%Y%m%d")
 
 
-def fetch_one(param: str, year: int, tile_idx: int, box) -> None:
-    lat_min, lat_max, lon_min, lon_max = box
+def _cache_file(param: str, year: int, tile_idx: int):
+    suffix = "_partial" if year == datetime.date.today().year else ""
+    return POWER_CACHE / f"{param}_{year}_tile{tile_idx}{suffix}.csv"
 
-    is_partial_year = year == datetime.date.today().year
-    suffix = "_partial" if is_partial_year else ""
-    out = POWER_CACHE / f"{param}_{year}_tile{tile_idx}{suffix}.csv"
+
+def fetch_one(param: str, year: int, tile_idx: int, box) -> str:
+    """Returns 'cached', 'ok' or 'failed'."""
+    lat_min, lat_max, lon_min, lon_max = box
+    out = _cache_file(param, year, tile_idx)
+
     if out.exists():
         print(f"  skip {out.name} (already cached)")
-        return
+        return "cached"
 
     start_str, end_str = _year_bounds(year)
-
     params = {
-        "parameters": param,
+        "parameters": param,          # regional endpoint: one parameter per call
         "community": "AG",
         "latitude-min": lat_min,
         "latitude-max": lat_max,
         "longitude-min": lon_min,
         "longitude-max": lon_max,
-        # Full calendar year -- NOT a single day. build_panel.py's
-        # rolling 7/14/30-day features need a continuous daily series;
-        # a one-day range here would make those windows meaningless.
-        # Capped by _year_bounds() so the current year isn't requested
-        # past the days POWER has actually published.
-        "start": start_str,
+        "start": start_str,           # full year: rolling features need a continuous series
         "end": end_str,
         "format": "CSV",
     }
-    if is_partial_year:
-        print(f"  note: {year} is still in progress -- only fetching "
-              f"through {end_str}, cached with a '_partial' suffix so "
-              "it's easy to spot and re-fetch once the year is complete.")
 
-    print(f"  fetching {param} {year} tile{tile_idx} "
-          f"[{lat_min},{lat_max}] x [{lon_min},{lon_max}] ...", end=" ", flush=True)
-    r = requests.get(POWER_URL, params=params, timeout=300)
+    print(f"  fetching {out.name} "
+          f"[{lat_min},{lat_max}] x [{lon_min},{lon_max}] {start_str}-{end_str} ...",
+          end=" ", flush=True)
 
-    if r.status_code == 422:
-        print(f"FAILED (422 -- tile still too large? response: {r.text[:200]})")
-        return
-    r.raise_for_status()
+    for attempt in range(1, MAX_RETRIES + 1):
+        wait = 5 * attempt
+        try:
+            r = requests.get(POWER_URL, params=params, timeout=REQUEST_TIMEOUT)
+        except requests.RequestException as e:
+            print(f"\n    network error ({type(e).__name__}), retry in {wait}s",
+                  end=" ", flush=True)
+            time.sleep(wait)
+            continue
 
-    out.write_text(r.text)
-    print("ok")
+        if r.status_code == 422:
+            print(f"FAILED (422 -- tile too large or invalid request: {r.text[:200]})")
+            return "failed"
+        if r.status_code in RETRY_STATUS:
+            print(f"\n    HTTP {r.status_code}, retry in {wait}s", end=" ", flush=True)
+            time.sleep(wait)
+            continue
+        if r.status_code != 200:
+            print(f"FAILED (HTTP {r.status_code})")
+            return "failed"
+        if "-END HEADER-" not in r.text:
+            print("FAILED (response is not a POWER CSV)")
+            return "failed"
 
-    time.sleep(1)  # be polite -- POWER throttles aggressive clients
+        tmp = out.with_name(out.name + ".tmp")   # atomic write
+        tmp.write_text(r.text)
+        tmp.replace(out)
+        print("ok")
+        time.sleep(PAUSE_BETWEEN)
+        return "ok"
+
+    print(f"FAILED after {MAX_RETRIES} attempts")
+    return "failed"
 
 
 def main():
-    print(f"Study area split into {len(TILES)} tile(s) to stay under "
-          f"POWER's regional size limit.")
+    parser = argparse.ArgumentParser(description="Download NASA POWER weather data")
+    parser.add_argument("--refresh-partial", action="store_true",
+                        help="delete cached *_partial.csv files and download them again")
+    args = parser.parse_args()
+
+    if args.refresh_partial:
+        old = list(POWER_CACHE.glob("*_partial.csv"))
+        for f in old:
+            f.unlink()
+        print(f"Removed {len(old)} partial file(s) from the cache.")
+
+    print(f"Study area split into {len(TILES)} tile(s):")
     for i, box in enumerate(TILES):
         print(f"  tile{i}: lat [{box[0]}, {box[1]}], lon [{box[2]}, {box[3]}]")
 
-    print(f"\nFetching {len(PARAMETERS)} parameters x "
-          f"{END_YEAR - START_YEAR + 1} years x {len(TILES)} tile(s) ...")
+    n_years = END_YEAR - START_YEAR + 1
+    total = len(PARAMETERS) * n_years * len(TILES)
+    print(f"\nFetching {len(PARAMETERS)} parameters x {n_years} years x "
+          f"{len(TILES)} tile(s) = {total} files ...")
+
+    counts = {"cached": 0, "ok": 0, "failed": 0}
+    failed = []
     for param in PARAMETERS:
         for year in range(START_YEAR, END_YEAR + 1):
             for tile_idx, box in enumerate(TILES):
-                fetch_one(param, year, tile_idx, box)
+                status = fetch_one(param, year, tile_idx, box)
+                counts[status] += 1
+                if status == "failed":
+                    failed.append(_cache_file(param, year, tile_idx).name)
 
+    print(f"\nSummary: {counts['ok']} downloaded, {counts['cached']} already cached, "
+          f"{counts['failed']} failed (total {total}).")
+    if failed:
+        print("Missing files (re-run the script to retry them):")
+        for name in failed:
+            print(f"  - {name}")
+        sys.exit(1)
     print("Done. Raw files are in data/raw/power_cache/")
 
 

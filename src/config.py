@@ -3,6 +3,7 @@ Shared settings for the whole pipeline. Change values here once;
 every other script imports from this file.
 """
 
+import math
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -32,30 +33,39 @@ PARAMETERS = [
 
 POWER_URL = "https://power.larc.nasa.gov/api/temporal/daily/regional"
 
-# NASA POWER regional requests are capped at roughly 4.5 x 4.5 degrees
-# (~100 grid points). A box bigger than that returns HTTP 422. Since our
-# study area is usually bigger, we tile it into chunks under that limit
-# and fetch/merge each chunk separately.
+# NASA POWER regional requests must respect BOTH limits, otherwise the API
+# returns HTTP 422:
+#   - a box bigger than ~4.5 x 4.5 degrees is refused (too many grid points)
+#   - a box smaller than 2 x 2 degrees is refused too
+# The study area is therefore split into tiles whose sides are between
+# MIN_TILE_DEG and MAX_TILE_DEG.
+MIN_TILE_DEG = 2.0
 MAX_TILE_DEG = 4.0  # a bit under 4.5 for safety margin
 
 
+def _split_axis(vmin, vmax, min_size, max_size):
+    """Split [vmin, vmax] into equal segments, each between min_size and max_size."""
+    span = vmax - vmin
+    if span < min_size:
+        raise ValueError(
+            f"Study area too small ({span} deg): POWER needs at least {min_size} deg."
+        )
+    n = math.ceil(span / max_size)      # fewest segments that respect max_size
+    step = span / n                     # equal segments -> none is too small
+    return [(vmin + i * step, vmin + (i + 1) * step) for i in range(n)]
+
+
 def generate_tiles(lat_min=LAT_MIN, lat_max=LAT_MAX,
-                    lon_min=LON_MIN, lon_max=LON_MAX,
-                    max_size=MAX_TILE_DEG):
-    """Split a bounding box into a grid of sub-boxes, each <= max_size degrees
-    on a side, that together cover the original box exactly (no overlap)."""
-    tiles = []
-    lat = lat_min
-    while lat < lat_max:
-        lat_end = min(lat + max_size, lat_max)
-        lon = lon_min
-        while lon < lon_max:
-            lon_end = min(lon + max_size, lon_max)
-            tiles.append((round(lat, 4), round(lat_end, 4),
-                          round(lon, 4), round(lon_end, 4)))
-            lon = lon_end
-        lat = lat_end
-    return tiles
+                   lon_min=LON_MIN, lon_max=LON_MAX,
+                   max_size=MAX_TILE_DEG, min_size=MIN_TILE_DEG):
+    """Split a bounding box into a grid of sub-boxes, each between min_size
+    and max_size degrees on a side, that together cover the original box
+    exactly (no overlap)."""
+    lat_tiles = _split_axis(lat_min, lat_max, min_size, max_size)
+    lon_tiles = _split_axis(lon_min, lon_max, min_size, max_size)
+    return [(round(a, 4), round(b, 4), round(c, 4), round(d, 4))
+            for (a, b) in lat_tiles for (c, d) in lon_tiles]
+
 
 # ---------------------------------------------------------------------------
 # Folder layout -- see README.md for the full tree
