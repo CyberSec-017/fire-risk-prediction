@@ -37,9 +37,8 @@ CURRENT_YEAR = datetime.date.today().year
 def _parse_power_csv(path, param: str) -> pd.DataFrame:
     """
     POWER CSVs start with a metadata block ending at a line containing
-    '-END HEADER-'. If your download has a different column layout than
-    LAT, LON, YEAR, MO, DY, <value>, this is the only place to fix it --
-    open one cached file in a text editor and compare.
+    '-END HEADER-'. The date comes either as YEAR, MO, DY or as YEAR, DOY
+    (day of year); both layouts are handled below.
     """
     lines = path.read_text().splitlines()
     start = next(i for i, l in enumerate(lines) if "-END HEADER-" in l) + 1
@@ -49,18 +48,23 @@ def _parse_power_csv(path, param: str) -> pd.DataFrame:
 
     if {"YEAR", "MO", "DY"}.issubset(df.columns):
         df["date"] = pd.to_datetime(dict(year=df.YEAR, month=df.MO, day=df.DY))
-        value_col = [c for c in df.columns
-                     if c not in {"LAT", "LON", "YEAR", "MO", "DY", "DOY", "date"}][0]
-        df = df[["LAT", "LON", "date", value_col]]
-        df.columns = ["lat_cell", "lon_cell", "date", param]
+    elif {"YEAR", "DOY"}.issubset(df.columns):
+        df["date"] = (pd.to_datetime(df["YEAR"].astype(int).astype(str), format="%Y")
+                      + pd.to_timedelta(df["DOY"].astype(int) - 1, unit="D"))
     else:
         raise ValueError(
             f"Unexpected POWER column layout in {path.name}: {list(df.columns)}. "
             "Adjust _parse_power_csv to match."
         )
 
+    value_col = [c for c in df.columns
+                 if c not in {"LAT", "LON", "YEAR", "MO", "DY", "DOY", "date"}][0]
+    df = df[["LAT", "LON", "date", value_col]]
+    df.columns = ["lat_cell", "lon_cell", "date", param]
+
     df[param] = df[param].replace(-999, np.nan)  # POWER's missing-value code
     return df
+
 
 
 def load_power() -> pd.DataFrame:

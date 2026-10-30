@@ -41,10 +41,10 @@ def filter_quality(df: pd.DataFrame) -> pd.DataFrame:
     # confidence: VIIRS uses l/n/h (low/nominal/high); MODIS uses 0-100.
     if "confidence" in df.columns:
         conf = df["confidence"]
-        if conf.dtype == object:
-            df = df[conf.str.lower().isin(["n", "h"])]
-        else:
+        if pd.api.types.is_numeric_dtype(conf):
             df = df[conf >= 50]
+        else:
+            df = df[conf.astype(str).str.strip().str.lower().isin(["n", "h", "nominal", "high"])]
     n2 = len(df)
 
     print(f"  raw detections        : {n0:,}")
