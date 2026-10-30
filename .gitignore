@@ -1,0 +1,20 @@
+
+# Environnement Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Données
+data/raw/
+data/interim/
+data/processed/
+
+# Fichiers temporaires
+.ipynb_checkpoints/
+*.log
+
+# Secrets et clés API
+.env
+.env.*
+!.env.example
