@@ -1,30 +1,24 @@
-# Fire Risk Prediction from NASA FIRMS + NASA POWER
+# Fire Risk Prediction from NASA FIRMS and NASA POWER
 
-Academic Data Mining project: predicts wildfire risk for a location from user-supplied weather inputs (temperature, humidity, coordinates, etc.), trained on a merged NASA FIRMS (fire detections) + NASA POWER (weather) dataset.
+Academic Data Mining project that aims to analyze and predict wildfire risk using satellite fire detections and meteorological data.
 
-## Idea in One Picture
+The project combines:
+- **NASA FIRMS:** Satellite-based fire detection data.
+- **NASA POWER:** Daily meteorological data.
 
-```text
-POWER (weather grid, complete)       FIRMS (fire points, sparse)
-every cell x every day                only where/when a fire was seen
-        │                                      │
-        └──────────── left join on ────────────┘
-                    (grid cell, date)
-                         │
-                         ▼
-        one row per cell per day, label = burned 0/1
-                         │
-                         ▼
-        + rolling rain/temp/humidity features (7/14/30-day)
-                         │
-                         ▼
-              data/processed/fire_panel.parquet
-                         │
-                         ▼
-                  train / evaluate model
-```
+The goal is to build a dataset linking weather conditions to fire occurrences and use it to train and evaluate machine learning models.
 
-FIRMS alone has no negative examples ("no fire here today" is never recorded), so the panel is built from POWER's complete grid and stamped with fire labels wherever a FIRMS detection lands.
+## Project Overview
+
+NASA POWER provides daily weather information for geographic grid cells, while NASA FIRMS provides fire detections at specific locations and dates.
+
+Both datasets are combined using geographic cells and dates to create a dataset where each row represents one cell on one day.
+
+The target variable is `burned`:
+- `1`: At least one fire detection was recorded.
+- `0`: No fire detection was recorded.
+
+Weather features are then used for analysis and prediction.
 
 ## Folder Structure
 
@@ -53,101 +47,94 @@ fire-risk-prediction/
 └── README.md
 ```
 
-## How to Run It
+## Installation
 
-### 0. Setup
+Clone the repository and install the required libraries:
 
 ```bash
+git clone https://github.com/CyberSec-017/fire-risk-prediction.git
+cd fire-risk-prediction
+
 pip install -r requirements.txt
 ```
 
-### 1. Download FIRMS Data (Manual, One-Time)
+## How to Run the Project
 
-Go to:
+### 1. Collect FIRMS Data
 
-https://firms.modaps.eosdis.nasa.gov/download/
+Download fire detection data from:
 
-Select the study area, date range and VIIRS S-NPP sensor. Download the CSV files and place them in `data/raw/`.
+[NASA FIRMS Download](https://firms.modaps.eosdis.nasa.gov/download/)
 
-The project uses `merge_firms.py` to combine the collected FIRMS files into:
+Select the study area, date range and VIIRS S-NPP sensor. Place the downloaded CSV files in `data/raw/`.
+
+Merge the collected files into:
 
 `data/raw/firms_raw.csv`
 
-### 2. Set Your Study Area
+### 2. Configure the Project
 
-Edit `src/config.py`:
+Edit `src/config.py` to define:
+- Geographic boundaries.
+- Start and end years.
+- NASA POWER meteorological variables.
+- Data storage paths.
 
-- `LAT_MIN`
-- `LAT_MAX`
-- `LON_MIN`
-- `LON_MAX`
-- `START_YEAR`
-- `END_YEAR`
+### 3. Run the Data Pipeline
 
-The study area covers northern Algeria and the surrounding region.
-
-### 3. Run the Pipeline in Order
-
-From the project root:
+Execute the scripts from the project root in the following order:
 
 ```bash
 python src/fetch_power.py
-python merge_firms.py
 python src/clean_firms.py
 python src/build_panel.py
-python src/train_baseline.py
 ```
 
-Each step reads the previous step's output from `data/`, so you can rerun individual steps without repeating earlier ones.
+The scripts download weather data, clean fire detections and combine both datasets.
 
-### 4. Explore and Write Up
+### 4. Analysis and Modeling
 
-Open `notebooks/exploration.ipynb` for plots such as:
+After building the final dataset:
+- Perform Exploratory Data Analysis (EDA).
+- Analyze relationships between weather conditions and fire occurrence.
+- Train and compare machine learning models.
+- Evaluate model performance.
+- Develop a Streamlit application.
 
-- Fire counts over time.
-- Geographic distribution of fire detections.
-- Weather feature distributions.
-- Relationships between meteorological variables and fire occurrence.
-
-These visualizations can be used in the scientific report.
-
-## Data Sources and Collection Details
+## Data Sources and Collection
 
 ### 1. NASA FIRMS — Fire Detection Data
 
-The fire detection data are obtained from NASA's Fire Information for Resource Management System (FIRMS).
+NASA FIRMS (Fire Information for Resource Management System) provides satellite-based fire detection information.
 
-- Official website: https://firms.modaps.eosdis.nasa.gov/
+- Website: [NASA FIRMS](https://firms.modaps.eosdis.nasa.gov/)
 - Satellite product: Suomi-NPP VIIRS Collection 2.
-- Data format: CSV.
+- Format: CSV.
 - Study period: 2024–2026.
-- Approximate number of raw records collected: 86,884.
+- Raw records collected: Approximately 86,884.
 
-The FIRMS dataset contains information about detected fire events, including:
-
+Important attributes include:
 - Latitude and longitude.
 - Acquisition date.
 - Detection type.
 - Confidence level.
 - Fire Radiative Power (FRP).
 
-The collected files are merged into:
+Raw data are stored in `data/raw/`.
 
-`data/raw/firms_raw.csv`
+### 2. NASA POWER — Meteorological Data
 
-### 2. NASA POWER — Weather Data
+NASA POWER (Prediction of Worldwide Energy Resources) provides daily meteorological information.
 
-Meteorological data are obtained from NASA POWER (Prediction Of Worldwide Energy Resources).
-
-- Official website: https://power.larc.nasa.gov/
-- Data type: Daily meteorological data.
-- Data format: CSV.
+- Website: [NASA POWER](https://power.larc.nasa.gov/)
+- Data frequency: Daily.
+- Format: CSV.
 - Study period: 2024–2026.
-- Number of meteorological variables: 7.
-- Geographic organization: 6 spatial tiles.
-- Total collected files: 126.
+- Number of variables: 7.
+- Geographic tiles: 6.
+- Expected files: 126.
 
-The following meteorological variables are used:
+The project uses the following variables:
 
 | Variable | Description |
 |---|---|
@@ -156,16 +143,16 @@ The following meteorological variables are used:
 | RH2M | Relative humidity at 2 meters |
 | WS2M | Wind speed at 2 meters |
 | PRECTOTCORR | Corrected precipitation |
-| ALLSKY_SFC_SW_DWN | All-sky surface shortwave downward irradiance |
+| ALLSKY_SFC_SW_DWN | Surface solar radiation |
 | GWETROOT | Root zone soil wetness |
 
-The downloaded files are stored in:
+The files are stored in `data/raw/power_cache/`.
 
-`data/raw/power_cache/`
+**Note:** NASA POWER data for 2026 are partial because the year is still in progress and recent observations may not yet be available.
 
 ### 3. Study Area
 
-The project focuses on a geographic area defined by the following coordinates:
+The project focuses on northern Algeria and the surrounding region.
 
 | Parameter | Value |
 |---|---:|
@@ -174,103 +161,80 @@ The project focuses on a geographic area defined by the following coordinates:
 | Minimum longitude | -2° |
 | Maximum longitude | 9° |
 
-The study area is divided into six geographic tiles to organize NASA POWER data collection.
+The region is divided into six geographic tiles to facilitate NASA POWER data collection.
 
-### 4. Study Period
+## Data Preprocessing and Feature Engineering
 
-The project covers the following years:
-
-- 2024
-- 2025
-- 2026
-
-NASA POWER data for 2026 are partial because the latest available observations depend on the data publication delay.
-
-### 5. Data Collection Summary
-
-| Source | Collected data |
-|---|---|
-| NASA FIRMS | Approximately 86,884 raw records |
-| NASA POWER | 126 CSV files |
-| Weather variables | 7 |
-| Study years | 3 |
-| Geographic tiles | 6 |
-
-These datasets provide the input for the preprocessing, exploratory analysis, statistical testing and machine learning stages.
-
-## Preprocessing and Feature Engineering
-
-The preprocessing stage transforms the raw data into a structured dataset suitable for machine learning.
+The preprocessing stage prepares the raw datasets for analysis and machine learning.
 
 ### FIRMS Processing
 
-The FIRMS processing script performs:
-
+The `clean_firms.py` script performs:
 - Data type filtering.
 - Confidence filtering.
 - Geographic grid assignment.
-- Grouping fire detections by grid cell and day.
-- Calculation of daily detection counts and total FRP.
+- Daily aggregation by grid cell.
+- Calculation of fire detection counts and total FRP.
 
 Output:
 
 `data/interim/fires_daily.parquet`
 
-### Weather Processing and Data Fusion
+### Weather Data and Fusion
 
-The panel construction script:
+The `build_panel.py` script:
+- Loads and combines NASA POWER variables.
+- Merges weather and fire data using grid cells and dates.
+- Creates the binary target `burned`.
+- Generates additional weather and temporal features.
 
-- Loads NASA POWER meteorological data.
-- Combines the weather variables.
-- Joins fire observations with the weather grid using geographic cells and dates.
-- Creates the binary target variable `burned`.
-- Generates temporal features.
+### Feature Engineering
 
-The temporal features include:
-
-- Rolling precipitation features over 7, 14 and 30 days.
-- Rolling temperature features.
-- Rolling humidity features.
+The generated features include:
+- Rolling precipitation over 7, 14 and 30 observations.
+- Rolling maximum temperature averages.
+- Rolling minimum humidity.
 - Consecutive dry-day counts.
-- Seasonal sine and cosine features.
+- Seasonal features using sine and cosine transformations.
 
 Final dataset:
 
 `data/processed/fire_panel.parquet`
 
-## Notes for the Report
+## Important Considerations
 
 ### Class Imbalance
 
-Fires are rare events, representing approximately 1–3% of the dataset rows in the current panel.
+Fire occurrences are much less frequent than non-fire observations.
 
-Accuracy alone is therefore insufficient to evaluate the model. Metrics such as Precision, Recall, F1-score, PR-AUC and ROC-AUC should also be considered.
+Therefore, accuracy alone is not sufficient to evaluate the models.
 
-### Time-Based Split
-
-The model should be evaluated using a chronological split rather than a random split.
-
-Training data must come from earlier dates, while validation and test data must come from later dates. This avoids using future information to predict past observations.
-
-### Coordinates and Predictive Features
-
-Raw latitude and longitude require careful consideration when selecting model features. They can allow a model to memorize geographic patterns instead of learning meteorological relationships.
-
-Their inclusion or exclusion should be justified according to the prediction objective.
+The project will also consider:
+- Precision.
+- Recall.
+- F1-score.
+- ROC-AUC.
+- PR-AUC.
 
 ### Data Leakage
 
-Variables derived from fire observations, such as `n_detections` and `total_frp`, must not be used as predictors when they are also used to construct the target variable `burned`.
+Variables directly derived from fire observations, such as `n_detections` and `total_frp`, must not be used as predictors when predicting the `burned` target.
 
-All transformations that learn parameters from the data, such as imputation and normalization, must be fitted using training data only.
+Data preprocessing and transformations must also be handled carefully to avoid using information from the test dataset during training.
 
-### Known Limitations
+### Time-Based Evaluation
 
-- NASA POWER's approximately 50 km native grid may not capture local terrain and microclimate effects.
-- FIRMS may miss some small or short-lived fires, including detections affected by cloud cover.
-- Satellite fire detections do not necessarily represent every fire event.
-- The 2026 meteorological data are incomplete.
-- The resulting model estimates risk from available data and does not guarantee that a fire will or will not occur.
+A chronological train/validation/test split is preferred.
+
+Training data should come from earlier dates, while validation and test data should come from later dates.
+
+### Limitations
+
+- NASA POWER has a relatively coarse spatial resolution.
+- Satellite detections may miss some fire events.
+- The 2026 dataset is incomplete.
+- Fire detections do not necessarily represent every real fire.
+- Model predictions are estimates and cannot guarantee whether a fire will occur.
 
 ## Technologies Used
 
@@ -291,20 +255,20 @@ All transformations that learn parameters from the data, such as imputation and 
 2. Data cleaning and preprocessing.
 3. Feature engineering and dataset construction.
 4. Exploratory Data Analysis (EDA).
-5. Statistical hypothesis testing.
-6. Classical Machine Learning classification and clustering.
+5. Statistical analysis.
+6. Machine learning classification and clustering.
 7. Hyperparameter optimization using GridSearchCV with at least 5 folds.
 8. Model evaluation and comparison.
-9. Development of a Streamlit web application.
+9. Streamlit application development.
 10. Scientific report preparation.
 
-Deep Learning and Large Language Models are not used as machine learning models in this project, in accordance with the course requirements.
+Deep Learning and Large Language Models are not used as machine learning models, in accordance with the course requirements.
 
 ## References
 
-- NASA FIRMS: https://firms.modaps.eosdis.nasa.gov/
-- NASA FIRMS Download: https://firms.modaps.eosdis.nasa.gov/download/
-- NASA POWER: https://power.larc.nasa.gov/
-- NASA POWER Documentation: https://power.larc.nasa.gov/docs/
-- Scikit-learn Documentation: https://scikit-learn.org/stable/
-- Streamlit Documentation: https://docs.streamlit.io/
+- [NASA FIRMS](https://firms.modaps.eosdis.nasa.gov/)
+- [NASA FIRMS Download](https://firms.modaps.eosdis.nasa.gov/download/)
+- [NASA POWER](https://power.larc.nasa.gov/)
+- [NASA POWER Documentation](https://power.larc.nasa.gov/docs/)
+- [Scikit-learn Documentation](https://scikit-learn.org/stable/)
+- [Streamlit Documentation](https://docs.streamlit.io/)
