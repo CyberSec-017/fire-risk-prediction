@@ -56,19 +56,23 @@ NASA POWER provides daily meteorological and solar data.
 - **Number of variables:** 7.
 - **Geographic organization:** 6 tiles.
 
-### Meteorological Variables
+### 3.1 Meteorological Variables
 
-| Variable | Description |
+The following table describes the meteorological variables collected from NASA POWER and used in the Fire Risk Prediction project.
+
+| Variable | Meaning |
 |---|---|
 | `T2M` | Mean temperature at 2 meters |
 | `T2M_MAX` | Maximum temperature at 2 meters |
 | `RH2M` | Relative humidity at 2 meters |
 | `WS2M` | Wind speed at 2 meters |
 | `PRECTOTCORR` | Corrected precipitation |
-| `ALLSKY_SFC_SW_DWN` | All-sky surface shortwave downward radiation |
+| `ALLSKY_SFC_SW_DWN` | Incoming solar radiation under all-sky conditions |
 | `GWETROOT` | Root zone soil wetness |
 
-### Organization
+These variables describe the meteorological and soil conditions that may influence wildfire occurrence. They will be used during data preprocessing, exploratory analysis and machine learning.
+
+### 3.2 Organization
 
 The NASA POWER CSV files are stored in:
 
@@ -82,7 +86,7 @@ Files are organized according to:
 
 Each CSV contains daily observations for the corresponding variable and geographic tile.
 
-### Missing Values
+### 3.3 Missing Values
 
 NASA POWER uses the value `-999` to represent missing data.
 
