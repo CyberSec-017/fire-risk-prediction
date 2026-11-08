@@ -24,6 +24,12 @@ def load_raw() -> pd.DataFrame:
             "Download it from https://firms.modaps.eosdis.nasa.gov/download/ "
             "for your study area and date range, then save it at this path."
         )
+    
+    raw = pd.read_csv("E:/CS/Projects/Data Mining/fire-risk-prediction/data/raw/firms_raw.csv")
+    year = raw["acq_date"].str[:4]
+    print(raw.groupby(year).size())                         # detections per year, raw
+    print(raw[raw["type"].isna()].groupby(year).size())     # rows with missing type
+    print(raw["acq_date"].min(), raw["acq_date"].max())    
     df = pd.read_csv(FIRMS_RAW)
     df.columns = [c.strip().lower() for c in df.columns]
     return df
@@ -55,8 +61,8 @@ def filter_quality(df: pd.DataFrame) -> pd.DataFrame:
 
 def snap_to_grid(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    df["lat_cell"] = (df["latitude"] / LAT_STEP).round() * LAT_STEP
-    df["lon_cell"] = (df["longitude"] / LON_STEP).round() * LON_STEP
+    df["lat_cell"] = ((df["latitude"] / LAT_STEP).round() * LAT_STEP).round(4)
+    df["lon_cell"] = ((df["longitude"] / LON_STEP).round() * LON_STEP).round(4)
     df["date"] = pd.to_datetime(df["acq_date"])
     return df
 

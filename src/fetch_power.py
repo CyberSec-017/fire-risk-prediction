@@ -30,7 +30,7 @@ TILES = generate_tiles()
 def fetch_one(param: str, year: int, tile_idx: int, box) -> None:
     lat_min, lat_max, lon_min, lon_max = box
     out = POWER_CACHE / f"{param}_{year}_tile{tile_idx}.csv"
-    if out.exists():
+    if out.exists() and out.stat().st_size > 10_000:
         print(f"  skip {out.name} (already cached)")
         return
 
@@ -41,19 +41,24 @@ def fetch_one(param: str, year: int, tile_idx: int, box) -> None:
         "latitude-max": lat_max,
         "longitude-min": lon_min,
         "longitude-max": lon_max,
-        "start": f"{year}0918",
-        "end": f"{year}0918",
+        "start": f"{year}0101",
+        "end": f"{year}1231",
         "format": "CSV",
     }
 
     print(f"  fetching {param} {year} tile{tile_idx} "
           f"[{lat_min},{lat_max}] x [{lon_min},{lon_max}] ...", end=" ", flush=True)
     r = requests.get(POWER_URL, params=params, timeout=300)
+    
+    
 
     if r.status_code == 422:
         print(f"FAILED (422 -- tile still too large? response: {r.text[:200]})")
         return
     r.raise_for_status()
+    if r.text.count("\n") < 1000:
+        print(f"SUSPICIOUS ({r.text.count(chr(10))} lines), not cached")
+        return
 
     out.write_text(r.text)
     print("ok")
