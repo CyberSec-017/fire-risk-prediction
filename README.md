@@ -42,18 +42,21 @@ fire-risk-project/
 │   ├── interim/
 │   │   └── fires_daily.parquet  <- clean_firms.py output
 │   └── processed/
-│       └── fire_panel.parquet   <- build_panel.py output (final dataset)
+│       ├── fire_panel.parquet   <- build_panel.py output (final dataset)
+│       ├── fire_model.joblib    <- train_baseline.py output (trained model)
+│       └── model_card.json      <- feature contract + test metrics
 ├── src/
 │   ├── config.py                <- all settings: study area, years, parameters
 │   ├── fetch_power.py           <- Step 1: download weather data
 │   ├── clean_firms.py           <- Step 2: clean + snap fire points to grid
 │   ├── build_panel.py           <- Step 3+4: join + rolling features
-│   └── train_baseline.py        <- Step 5: model + evaluation
+│   └── train_baseline.py        <- Step 5: model, evaluation, export
 ├── notebooks/
 │   └── exploration.ipynb        <- plots and sanity checks for the report
-├── report/
-│   └── figures/                 <- exported charts go here
+├── tests/
+│   └── test_pipeline.py         <- regression tests (pytest)
 ├── requirements.txt
+├── requirements-dev.txt
 └── README.md
 ```
 
@@ -96,14 +99,30 @@ risk map, feature distributions) — these become your report's figures.
 
 ## Notes for the report
 
-- **Class imbalance**: fires are rare (~1-3% of rows). Accuracy is
-  meaningless here — the model reports PR-AUC and Brier score instead.
-- **Time-based split**: the model is evaluated on the most recent year
-  only, never a random split, because adjacent days/cells are strongly
-  correlated and a random split would leak information.
-- **Coordinates excluded from features**: including raw lat/lon lets
-  the model memorize "this region burns" instead of learning from
-  weather, which would defeat the project's goal.
+- **Class imbalance**: fires are rare (measured at ~2.7% of panel rows on the
+  current data). Accuracy is meaningless here — the model reports PR-AUC and
+  Brier score instead.
+- **Time-based split**: training uses years before `VAL_YEAR`, that year fits
+  the probability calibrator, and every later year is the test set. A random
+  split would leak information because adjacent days/cells are correlated.
+- **Coordinates**: `USE_COORDS = True` includes `lat_cell`/`lon_cell` as
+  features. Set it to `False` in `src/train_baseline.py` if you want the model
+  to learn from weather only; then re-run training.
+- **Model contract**: `train_baseline.py` writes `data/processed/model_card.json`
+  with the exact feature names, their order, a feature hash and the test
+  metrics. Any serving layer should check these before loading the model.
+- **Serving note**: the current model uses 20 features including
+  `lat_cell`/`lon_cell`. The Streamlit app on the `main` branch builds 18
+  features without coordinates, so align its `config.FEATURES` and
+  `features.py` with `model_card.json` (or retrain with `USE_COORDS = False`)
+  before copying the model to the project root.
 - **Known limitations** (worth a paragraph in your report): POWER's
   ~50km grid can't capture local terrain/microclimate effects; FIRMS
   can miss small or short-lived fires under cloud cover.
+
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest -q
+```

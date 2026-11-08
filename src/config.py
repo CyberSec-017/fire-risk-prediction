@@ -12,7 +12,7 @@ from pathlib import Path
 LAT_MIN, LAT_MAX = 32.0, 37.5
 LON_MIN, LON_MAX = -2.0, 9.0
 
-START_YEAR, END_YEAR = 2024, 2026
+START_YEAR, END_YEAR = 2018, 2024
 
 # POWER's native grid cell size. Do not change unless NASA changes it.
 LAT_STEP = 0.5
@@ -26,36 +26,49 @@ PARAMETERS = [
     "RH2M",                 # relative humidity at 2m        (%)
     "WS2M",                 # wind speed at 2m                (m/s)
     "PRECTOTCORR",          # corrected total precipitation   (mm/day)
-    "ALLSKY_SFC_SW_DWN",    # solar radiation reaching ground (MJ/m2/day)
     "GWETROOT",             # root-zone soil wetness          (0-1)
 ]
 
 POWER_URL = "https://power.larc.nasa.gov/api/temporal/daily/regional"
 
-# NASA POWER regional requests are capped at roughly 4.5 x 4.5 degrees
-# (~100 grid points). A box bigger than that returns HTTP 422. Since our
-# study area is usually bigger, we tile it into chunks under that limit
-# and fetch/merge each chunk separately.
-MAX_TILE_DEG = 4.0  # a bit under 4.5 for safety margin
+# NASA POWER regional requests must be between roughly 2 degrees (minimum)
+# and 4.5 degrees / ~100 grid points (maximum) per side, or the API
+# returns HTTP 422. Since our study area is usually outside that range,
+# we tile it into evenly-sized chunks that respect both bounds.
+MAX_TILE_DEG = 4.0
+MIN_TILE_DEG = 2.0
+
+
+def _split_axis(lo, hi, max_size=MAX_TILE_DEG, min_size=MIN_TILE_DEG):
+    """Split [lo, hi] into evenly-sized pieces, each between min_size and
+    max_size degrees (as close to equal as possible), not left-to-right
+    greedy chunks -- greedy chunking can leave an undersized remainder
+    tile at the edge, which POWER also rejects."""
+    total = hi - lo
+    if total <= max_size:
+        return [(round(lo, 4), round(hi, 4))]
+
+    n = max(1, -(-total // max_size))  # ceil division
+    while n > 1 and total / n < min_size:
+        n -= 1
+    n = int(n)
+
+    size = total / n
+    edges = [lo + i * size for i in range(n)] + [hi]
+    return [(round(edges[i], 4), round(edges[i + 1], 4)) for i in range(n)]
 
 
 def generate_tiles(lat_min=LAT_MIN, lat_max=LAT_MAX,
-                    lon_min=LON_MIN, lon_max=LON_MAX,
-                    max_size=MAX_TILE_DEG):
-    """Split a bounding box into a grid of sub-boxes, each <= max_size degrees
-    on a side, that together cover the original box exactly (no overlap)."""
-    tiles = []
-    lat = lat_min
-    while lat < lat_max:
-        lat_end = min(lat + max_size, lat_max)
-        lon = lon_min
-        while lon < lon_max:
-            lon_end = min(lon + max_size, lon_max)
-            tiles.append((round(lat, 4), round(lat_end, 4),
-                          round(lon, 4), round(lon_end, 4)))
-            lon = lon_end
-        lat = lat_end
-    return tiles
+                    lon_min=LON_MIN, lon_max=LON_MAX):
+    """Split a bounding box into a grid of sub-boxes that together cover
+    the original box exactly, each respecting POWER's min/max size."""
+    lat_ranges = _split_axis(lat_min, lat_max)
+    lon_ranges = _split_axis(lon_min, lon_max)
+    return [
+        (la, lb, lo, lohi)
+        for (la, lb) in lat_ranges
+        for (lo, lohi) in lon_ranges
+    ]
 
 # ---------------------------------------------------------------------------
 # Folder layout -- see README.md for the full tree
@@ -72,5 +85,24 @@ FIRES_DAILY = INTERIM_DIR / "fires_daily.parquet"
 PROCESSED_DIR = ROOT / "data" / "processed"
 FIRE_PANEL = PROCESSED_DIR / "fire_panel.parquet"
 
-for d in (RAW_DIR, POWER_CACHE, INTERIM_DIR, PROCESSED_DIR):
-    d.mkdir(parents=True, exist_ok=True)
+DATA_DIRS = (RAW_DIR, POWER_CACHE, INTERIM_DIR, PROCESSED_DIR)
+
+
+def power_cache_path(param: str, year: int, tile_idx: int) -> Path:
+    """The one place that defines the POWER cache filename.
+
+    fetch_power.py writes these files and build_panel.py reads them, so the
+    two must never build the name independently.
+    """
+    return POWER_CACHE / f"{param}_{year}_tile{tile_idx}.csv"
+
+
+def ensure_data_dirs() -> None:
+    """Create the data folders when a script needs them.
+
+    This used to run at import time, which made importing config mutate the
+    filesystem and broke read-only/container runs. Call this from a script's
+    ``main()`` instead.
+    """
+    for d in DATA_DIRS:
+        d.mkdir(parents=True, exist_ok=True)

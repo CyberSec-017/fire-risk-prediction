@@ -14,7 +14,11 @@ Usage:
 
 import pandas as pd
 
-from config import FIRMS_RAW, FIRES_DAILY, LAT_STEP, LON_STEP
+from config import (
+    FIRMS_RAW, FIRES_DAILY, LAT_STEP, LON_STEP,
+    LAT_MIN, LAT_MAX, LON_MIN, LON_MAX, START_YEAR, END_YEAR,
+    ensure_data_dirs,
+)
 
 
 def load_raw() -> pd.DataFrame:
@@ -24,8 +28,16 @@ def load_raw() -> pd.DataFrame:
             "Download it from https://firms.modaps.eosdis.nasa.gov/download/ "
             "for your study area and date range, then save it at this path."
         )
+    
     df = pd.read_csv(FIRMS_RAW)
     df.columns = [c.strip().lower() for c in df.columns]
+
+    required = {"latitude", "longitude", "acq_date", "frp"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(
+            f"{FIRMS_RAW} is missing required column(s): {sorted(missing)}"
+        )
     return df
 
 
@@ -34,17 +46,22 @@ def filter_quality(df: pd.DataFrame) -> pd.DataFrame:
 
     # type: 0 = presumed vegetation fire, 1 = volcano, 2 = other static
     # land source (gas flares etc.), 3 = offshore. Keep vegetation only.
+    # Coerce to numeric so a text-typed column cannot raise a comparison error.
     if "type" in df.columns:
-        df = df[df["type"] == 0]
+        df = df[pd.to_numeric(df["type"], errors="coerce") == 0]
     n1 = len(df)
 
     # confidence: VIIRS uses l/n/h (low/nominal/high); MODIS uses 0-100.
+    # Do not rely on the pandas dtype name: pandas 3 stores text columns as
+    # Arrow strings, so `dtype == object` is False and the numeric branch would
+    # compare "n"/"h" to 50 and crash.
     if "confidence" in df.columns:
         conf = df["confidence"]
-        if conf.dtype == object:
-            df = df[conf.str.lower().isin(["n", "h"])]
+        conf_text = conf.astype("string").str.strip().str.lower()
+        if conf_text.isin(["l", "n", "h"]).any():
+            df = df[conf_text.isin(["n", "h"])]
         else:
-            df = df[conf >= 50]
+            df = df[pd.to_numeric(conf, errors="coerce") >= 50]
     n2 = len(df)
 
     print(f"  raw detections        : {n0:,}")
@@ -55,9 +72,29 @@ def filter_quality(df: pd.DataFrame) -> pd.DataFrame:
 
 def snap_to_grid(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    df["lat_cell"] = (df["latitude"] / LAT_STEP).round() * LAT_STEP
-    df["lon_cell"] = (df["longitude"] / LON_STEP).round() * LON_STEP
+    df["lat_cell"] = ((df["latitude"] / LAT_STEP).round() * LAT_STEP).round(4)
+    df["lon_cell"] = ((df["longitude"] / LON_STEP).round() * LON_STEP).round(4)
     df["date"] = pd.to_datetime(df["acq_date"])
+    return df
+
+
+def filter_study_area(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep only detections inside the configured box and year range.
+
+    The raw FIRMS download can cover a wider area than the weather grid.
+    Without this filter those detections can never match a POWER cell, so
+    they only inflate the fire file and distort the hotspot statistics.
+    """
+    n0 = len(df)
+    dates = pd.to_datetime(df["acq_date"])
+    keep = (
+        df["latitude"].between(LAT_MIN, LAT_MAX)
+        & df["longitude"].between(LON_MIN, LON_MAX)
+        & dates.dt.year.between(START_YEAR, END_YEAR)
+    )
+    df = df[keep]
+    print(f"  inside study area     : {len(df):,} "
+          f"(dropped {n0 - len(df):,})")
     return df
 
 
@@ -84,11 +121,15 @@ def collapse_to_daily(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def main():
+    ensure_data_dirs()
     print("Loading raw FIRMS data ...")
     df = load_raw()
 
     print("Applying quality filters ...")
     df = filter_quality(df)
+
+    print("Filtering to the study area ...")
+    df = filter_study_area(df)
 
     print("Snapping detections to POWER grid cells ...")
     df = snap_to_grid(df)
