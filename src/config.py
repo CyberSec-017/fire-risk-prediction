@@ -87,3 +87,5 @@ FIRE_PANEL = PROCESSED_DIR / "fire_panel.parquet"
 
 for d in (RAW_DIR, POWER_CACHE, INTERIM_DIR, PROCESSED_DIR):
     d.mkdir(parents=True, exist_ok=True)
+
+H = 3   # forecast horizon in days: "fire in the next H days"

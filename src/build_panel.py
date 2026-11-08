@@ -22,6 +22,7 @@ from config import POWER_CACHE
 from config import (
     PARAMETERS, START_YEAR, END_YEAR,
     POWER_CACHE, FIRES_DAILY, FIRE_PANEL, generate_tiles,
+    H
 )
 
 TILES = generate_tiles()
@@ -166,6 +167,10 @@ def main():
 
     print("Adding rolling dryness features ...")
     panel = add_features(panel)
+    
+    g = panel.groupby(["lat_cell", "lon_cell"], sort=False)["burned"]
+    panel["target"] = g.transform(lambda s: s[::-1].rolling(H).max()[::-1].shift(-1))
+    panel = panel.dropna(subset=["target"])   # last H days of each cell have no future
 
     panel.to_parquet(FIRE_PANEL, index=False)
     print(f"Saved {FIRE_PANEL} ({len(panel):,} rows, {panel.shape[1]} columns)")

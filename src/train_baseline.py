@@ -29,7 +29,7 @@ from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.frozen import FrozenEstimator
 from sklearn.metrics import average_precision_score, brier_score_loss
 
-from config import FIRE_PANEL
+from config import FIRE_PANEL,H
 
 # ---------------------------------------------------------------------------
 # Experiment settings
@@ -37,12 +37,12 @@ from config import FIRE_PANEL
 USE_COORDS = True
 FEATURE_SET = "full"     # "full" or "geo_season"
 VAL_YEAR = 2021          # calibration year; test = all years after it
-
+LABEL = "target"
 # Risk levels on the calibrated probability (tune on the validation table).
-RISK_BINS = [0, 0.005, 0.02, 0.06, 1.0]
+RISK_BINS = [0, 0.01, 0.05, 0.15, 1.0]
 RISK_LABELS = ["LOW", "MODERATE", "HIGH", "VERY HIGH"]
 
-EXCLUDE_COLS = {"date", "burned", "n_detections", "total_frp"}
+EXCLUDE_COLS = {"date", "burned", "n_detections", "total_frp", "target"}
 if not USE_COORDS:
     EXCLUDE_COLS |= {"lat_cell", "lon_cell"}
 
@@ -59,26 +59,25 @@ def load_data():
 def time_split(df: pd.DataFrame):
     val_start = pd.Timestamp(f"{VAL_YEAR}-01-01")
     test_start = pd.Timestamp(f"{VAL_YEAR + 1}-01-01")
-    train = df[df["date"] < val_start]
-    val = df[(df["date"] >= val_start) & (df["date"] < test_start)]
+    train = df[df["date"] < val_start - pd.Timedelta(days=H)]
+    val = df[(df["date"] >= val_start) & (df["date"] < test_start - pd.Timedelta(days=H))]
     test = df[df["date"] >= test_start]
     print(f"  train {len(train):,} | val {len(val):,} | test {len(test):,}")
     return train, val, test
 
 
-def climatology_pr_auc(train: pd.DataFrame, test: pd.DataFrame) -> float:
-    """PR-AUC of predicting each cell's usual fire rate for the month."""
+def climatology_proba(train, test):
     clim = (train.assign(m=train.date.dt.month)
                  .groupby(["lat_cell", "lon_cell", "m"])["burned"].mean()
                  .rename("clim"))
     te = test.assign(m=test.date.dt.month).join(clim, on=["lat_cell", "lon_cell", "m"])
-    return average_precision_score(te["burned"], te["clim"].fillna(0))
+    return te["clim"].fillna(0).to_numpy()
 
 
 def risk_level_table(data: pd.DataFrame, p) -> pd.DataFrame:
     levels = pd.cut(p, bins=RISK_BINS, labels=RISK_LABELS, include_lowest=True)
     return (data.assign(level=levels)
-                .groupby("level", observed=True)["burned"]
+                .groupby("level", observed=True)[LABEL]
                 .agg(n="size", fire_rate="mean"))
 
 
@@ -88,21 +87,23 @@ def main():
     print(f"  {len(features)} features")
 
     train, val, test = time_split(df)
-    print(f"  climatology PR-AUC: {climatology_pr_auc(train, test):.4f}")
+    
 
     print("Training HistGradientBoostingClassifier ...")
     model = HistGradientBoostingClassifier(
         max_iter=200, learning_rate=0.05, max_depth=5,
         min_samples_leaf=200, l2_regularization=1.0,
         early_stopping=False,   # its default validation split is random -> leaks
+        random_state=0
     )
-    model.fit(train[features], train["burned"])
+    model.fit(train[features], train[LABEL])
 
-    cal = CalibratedClassifierCV(FrozenEstimator(model), method="sigmoid")
-    cal.fit(val[features], val["burned"])
+    cal = CalibratedClassifierCV(FrozenEstimator(model), method="isotonic")
+    cal.fit(val[features], val[LABEL])
 
     p_val = cal.predict_proba(val[features])[:, 1]
     proba = cal.predict_proba(test[features])[:, 1]
+    raw = model.predict_proba(test[features])[:, 1]
     print(f"  val PR-AUC: {average_precision_score(val['burned'], p_val):.4f}")
 
     # --- risk levels -------------------------------------------------------
@@ -115,23 +116,39 @@ def main():
     chk = test.assign(pred=proba)
     print("\nObserved vs predicted, per test year")
     print(chk.groupby(chk.date.dt.year)
-             .agg(observed=("burned", "mean"), predicted=("pred", "mean")))
+             .agg(observed=(LABEL, "mean"), predicted=("pred", "mean")))
 
     deciles = pd.qcut(proba, 10, duplicates="drop")
     print("\nObserved vs predicted, per risk decile")
     print(chk.groupby(deciles, observed=True)
-             .agg(n=("burned", "size"), predicted=("pred", "mean"),
-                  observed=("burned", "mean")))
+             .agg(n=(LABEL, "size"), predicted=("pred", "mean"),
+                  observed=(LABEL, "mean")))
 
-    top = proba >= pd.Series(proba).quantile(0.9)
-    top_share = test.loc[top, "burned"].sum() / test["burned"].sum()
+    top = raw >= pd.Series(proba).quantile(0.9)
+    top_share = test.loc[top, LABEL].sum() / test[LABEL].sum()
 
     # --- headline metrics --------------------------------------------------
-    pr_auc = average_precision_score(test["burned"], proba)
-    base_rate = test["burned"].mean()
-    brier = brier_score_loss(test["burned"], proba)
+    pr_auc = average_precision_score(test[LABEL], raw)
+    base_rate = test[LABEL].mean()
+    brier = brier_score_loss(test[LABEL], proba)
     brier_skill = 1 - brier / (base_rate * (1 - base_rate))
 
+        
+    p_clim = climatology_proba(train, test)
+    clim_pr = average_precision_score(test[LABEL], p_clim)
+    clim_brier = brier_score_loss(test[LABEL], p_clim)
+    clim_skill = 1 - clim_brier / (base_rate * (1 - base_rate))
+    cmp = test.assign(model=raw, clim=p_clim)
+    for y, g in cmp.groupby(cmp.date.dt.year):
+        print(y, "model", round(average_precision_score(g[LABEL], g["model"]), 4),
+                 "| climatology", round(average_precision_score(g[LABEL], g["clim"]), 4))
+    
+    yr = test["date"].dt.year.to_numpy()
+    yb = test["burned"].to_numpy()
+
+    
+    print(f"  Climatology PR-AUC: {clim_pr:.4f}")
+    print(f"  Climatology Brier skill: {clim_skill:.4f}")
     print("\nResults (test)")
     print(f"  PR-AUC            : {pr_auc:.4f}   (random guess = {base_rate:.4f})")
     print(f"  Brier score       : {brier:.4f}")
