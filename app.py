@@ -241,7 +241,7 @@ with col_m2:
                 <span style="font-size: 0.72rem; background-color: {COLORS['surface_subtle']}; padding: 2px 8px; border-radius: 4px; color: {COLORS['text_muted']};">Module 4</span>
             </div>
             <p style="font-size: 0.84rem; color: {COLORS['text_secondary']}; line-height: 1.5; margin: 0 0 14px 0;">
-                Operational inference cockpit accepting weather parameters, drought history, and spatial harmonics to predict fire ignition risk levels and calibrated probability scores.
+                Operational inference cockpit accepting weather parameters, drought history, and spatial harmonics to predict calibrated 3-day fire probability and risk levels.
             </p>
             <div style="font-size: 0.76rem; color: {COLORS['text_muted']}; border-top: 1px solid {COLORS['border_light']}; padding-top: 8px;">
                 <b>Key Capabilities:</b> Real-time inference • Model staging verification • Scenario presets
@@ -270,7 +270,7 @@ with st.expander("Geographic and Sensor Specifications", expanded=False):
             "Suomi-NPP VIIRS (375m spatial resolution, Collection 2)",
             "Type = 0 (Presumed vegetation fire), Confidence ≥ Nominal",
             "NASA POWER Daily Regional Model (0.5° × 0.625° resolution)",
-            "Binary same-day ignition indicator (burned = 1 if ≥1 active fire detected)",
+            "Observed label: same-day burned = 1 if ≥1 active fire detected | Shipped model target: ≥1 fire in the cell within the next 3 days",
         ],
     }
     st.dataframe(pd.DataFrame(spec_data), use_container_width=True, hide_index=True)

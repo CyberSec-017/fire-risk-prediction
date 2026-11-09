@@ -23,6 +23,7 @@ FIRES_DAILY_PATH = INTERIM_DIR / "fires_daily.parquet"
 FIRMS_RAW_PATH = RAW_DIR / "firms_raw.csv"
 MODEL_PATH = MODELS_DIR / "fire_model.joblib"
 MODEL_CARD_PATH = MODELS_DIR / "model_card.json"
+STUDY_POLYGON_PATH = DATA_DIR / "reference" / "algeria_boundary.geojson"
 
 # ---------------------------------------------------------------------------
 # Study Area & Spatial Resolution

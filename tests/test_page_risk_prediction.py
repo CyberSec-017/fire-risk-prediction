@@ -53,7 +53,7 @@ def test_clicking_evaluate_shows_risk_result():
     rendered = "\n".join(item.value for item in app.markdown)
     assert "Risk Assessment" in rendered
     assert (
-        "Calibrated probability" in rendered
+        "Calibrated 3-day probability" in rendered
         or "Demo heuristic, not a trained model" in rendered
     )
     assert "20 features" in rendered

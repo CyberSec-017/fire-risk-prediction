@@ -13,6 +13,7 @@ import json
 import sys
 from pathlib import Path
 
+import joblib
 import numpy as np
 import pandas as pd
 import pytest
@@ -143,6 +144,39 @@ def test_model_feature_order_mismatch_is_error(tmp_path):
     assert "feature" in (bundle.error or "").lower()
 
 
+def test_shipped_artifact_package_matches_model_card():
+    payload = joblib.load(core.MODEL_PATH)
+
+    assert isinstance(payload, dict)
+    assert payload["features"] == CARD["feature_names"]
+    assert payload["risk_bins"] == CARD["risk_bins"]
+    assert payload["risk_labels"] == CARD["risk_labels"]
+    assert payload["horizon_days"] == CARD["horizon_days"] == 3
+    assert CARD["metrics"] is None
+
+
+def test_packaged_artifact_without_model_is_error(tmp_path):
+    bad_model = tmp_path / "packaged.joblib"
+    joblib.dump({"features": CARD["feature_names"]}, bad_model)
+
+    bundle = core.load_model_bundle(bad_model, core.MODEL_CARD_PATH)
+
+    assert bundle.status == "ERROR"
+    assert "model" in (bundle.error or "").lower()
+
+
+def test_packaged_artifact_bin_mismatch_is_error(tmp_path):
+    payload = dict(joblib.load(core.MODEL_PATH))
+    payload["risk_bins"] = [0.0, 0.5, 0.75, 0.9, 1.0]
+    bad_model = tmp_path / "packaged.joblib"
+    joblib.dump(payload, bad_model)
+
+    bundle = core.load_model_bundle(bad_model, core.MODEL_CARD_PATH)
+
+    assert bundle.status == "ERROR"
+    assert "bins" in (bundle.error or "").lower()
+
+
 # ---------------------------------------------------------------------------
 # Grid, date and feature construction
 # ---------------------------------------------------------------------------
@@ -269,20 +303,20 @@ def test_parse_power_point_json_rejects_missing_parameter():
 
 def test_risk_level_boundaries_follow_card_bins():
     assert core.risk_level(0.0, CARD) == "LOW"
-    assert core.risk_level(0.005, CARD) == "LOW"
-    assert core.risk_level(0.0051, CARD) == "MODERATE"
-    assert core.risk_level(0.02, CARD) == "MODERATE"
-    assert core.risk_level(0.0201, CARD) == "HIGH"
-    assert core.risk_level(0.06, CARD) == "HIGH"
-    assert core.risk_level(0.0601, CARD) == "VERY HIGH"
+    assert core.risk_level(0.01, CARD) == "LOW"
+    assert core.risk_level(0.0101, CARD) == "MODERATE"
+    assert core.risk_level(0.05, CARD) == "MODERATE"
+    assert core.risk_level(0.0501, CARD) == "HIGH"
+    assert core.risk_level(0.15, CARD) == "HIGH"
+    assert core.risk_level(0.1501, CARD) == "VERY HIGH"
     assert core.risk_level(1.0, CARD) == "VERY HIGH"
 
 
 def test_risk_index_spans_each_band():
     assert core.risk_index(0.0, CARD) == pytest.approx(0.0)
-    assert core.risk_index(0.005, CARD) == pytest.approx(25.0)
-    assert core.risk_index(0.02, CARD) == pytest.approx(50.0)
-    assert core.risk_index(0.06, CARD) == pytest.approx(75.0)
+    assert core.risk_index(0.01, CARD) == pytest.approx(25.0)
+    assert core.risk_index(0.05, CARD) == pytest.approx(50.0)
+    assert core.risk_index(0.15, CARD) == pytest.approx(75.0)
     assert core.risk_index(1.0, CARD) == pytest.approx(100.0)
 
 

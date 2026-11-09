@@ -189,11 +189,12 @@ with tab_ml:
         - **Required Metric Standards:**
           - **PR-AUC (Precision-Recall Area Under Curve):** Primary performance benchmark; sensitive to rare positive class ranking.
           - **Brier Score Loss:** Assesses calibration of output probability estimates.
-          - **Balanced Class Weights:** Loss function penalization for false negatives during tree construction.
+        - **Shipped Estimator:** `HistGradientBoostingClassifier` (200 iterations, depth 5, learning rate 0.05) wrapped in `CalibratedClassifierCV` with isotonic calibration fitted on the 2021 validation year.
 
         #### 2. Temporal Splitting Protocol
         Due to severe temporal auto-correlation between contiguous days (heatwaves lasting 5–10 days), standard randomized K-Fold cross-validation suffers from temporal data leakage.
-        - **Chronological Split:** The training partition utilizes early years (2024–2025), while final validation evaluates on subsequent periods (2026).
+        - **Chronological Split:** The shipped model trains on 2018–2020, calibrates on 2021, and holds out 2022–2024. The dashboard panel (2024–2026) is newer than the model's test period and is scored as new data, not as a fresh evaluation set.
+        - **Prediction Horizon:** The target is at least one fire in the grid cell within the next 3 days (`horizon_days = 3`). Calibrated probabilities refer to that 3-day window, not to a single calendar day.
         """
     )
 
@@ -209,8 +210,8 @@ with tab_governance:
         #### Strict Feature Exclusion Rules
         To ensure scientific validity and real-world applicability:
         1. **Fire-Derived Columns Excluded:** Columns such as `n_detections` and `total_frp` are strictly banned from feature sets during training and inference. Using them would represent catastrophic data leakage (predicting fire presence using fire measurements).
-        2. **Spatial Coordinates Excluded from Predictors:** `lat_cell` and `lon_cell` are withheld from model inputs. This prevents the classifier from simply memorizing historical hotspot locations and forces it to learn transferable physical-meteorological relationships.
-        3. **Same-Day Target Semantics:** The `burned` target represents same-day occurrence, matching the operational capability of daily satellite fire monitoring systems.
+        2. **Spatial Coordinates Used Deliberately:** `lat_cell` and `lon_cell` are model inputs (`use_coords = true`) so the classifier can learn regional fire climatology. They are not derived from fire observations and therefore do not leak the target.
+        3. **Target Horizon vs. Observed Layer:** The panel's `burned` column is a same-day detection label. The shipped model's target is at least one fire within the next 3 days (`horizon_days = 3`), so its probabilities refer to that window. The map's observed overlay remains same-day and is deliberately not treated as the model's target.
         """
     )
 

@@ -84,7 +84,7 @@ def risk_scores() -> pd.DataFrame:
         {
             "lat_cell": [36.0, 36.5, 37.0],
             "lon_cell": [2.5, 3.125, 3.75],
-            "probability": [0.001, 0.5, 0.03],
+            "probability": [0.001, 0.5, 0.07],
             "risk": ["LOW", "VERY HIGH", "HIGH"],
             "burned": [1, 0, 1],
         }
@@ -239,10 +239,10 @@ def test_render_risk_map_legend_uses_card_bands():
     html = m.get_root().render()
 
     assert "Predicted Fire Risk" in html
-    assert "Low (0.0% – 0.5%)" in html
-    assert "Moderate (0.5% – 2.0%)" in html
-    assert "High (2.0% – 6.0%)" in html
-    assert "Very High (6.0%+)" in html
+    assert "Low (0.0% – 1.0%)" in html
+    assert "Moderate (1.0% – 5.0%)" in html
+    assert "High (5.0% – 15.0%)" in html
+    assert "Very High (15.0%+)" in html
     assert "Outside the model's study area (no prediction)" in html
 
 
@@ -255,7 +255,7 @@ def test_render_risk_map_tooltips_and_colors_follow_risk_band():
     low, very_high, high = markers
     assert tooltip_text(low) == "36.00°N, 2.50°E • 0.1% • Low"
     assert tooltip_text(very_high) == "36.50°N, 3.12°E • 50.0% • Very High"
-    assert tooltip_text(high) == "37.00°N, 3.75°E • 3.0% • High"
+    assert tooltip_text(high) == "37.00°N, 3.75°E • 7.0% • High"
 
     assert low.options["fillColor"] == COLORS["risk_low"]
     assert very_high.options["fillColor"] == COLORS["risk_very_high"]
@@ -270,7 +270,7 @@ def test_render_risk_map_derives_band_when_risk_column_missing():
     assert [tooltip_text(marker) for marker in markers] == [
         "36.00°N, 2.50°E • 0.1% • Low",
         "36.50°N, 3.12°E • 50.0% • Very High",
-        "37.00°N, 3.75°E • 3.0% • High",
+        "37.00°N, 3.75°E • 7.0% • High",
     ]
     assert markers[0].options["fillColor"] == COLORS["risk_low"]
     assert markers[1].options["fillColor"] == COLORS["risk_very_high"]
@@ -345,7 +345,7 @@ def test_render_risk_map_empty_scores_still_draws_legend():
     html = m.get_root().render()
 
     assert "Predicted Fire Risk" in html
-    assert "Very High (6.0%+)" in html
+    assert "Very High (15.0%+)" in html
     assert circle_markers(m) == []
 
 

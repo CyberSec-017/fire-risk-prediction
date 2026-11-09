@@ -40,10 +40,12 @@ fire-risk-prediction/
 │   └── train_baseline.py
 ├── notebooks/
 │   └── exploration.ipynb
+├── models/
+│   ├── fire_model.joblib
+│   └── model_card.json
 ├── report/
 │   └── figures/
 ├── requirements.txt
-├── requirements-lock.txt
 └── README.md
 ```
 
@@ -205,8 +207,12 @@ Final dataset:
 
 The trained model is stored in:
 
-- `models/fire_model.joblib` — calibrated scikit-learn classifier.
-- `models/model_card.json` — model version, feature order, risk bands and calibration metadata.
+- `models/fire_model.joblib` — calibrated scikit-learn classifier, supplied as a
+  packaged artifact: `{"model": ..., "features": [...], "horizon_days": 3,
+  "risk_bins": [...], "risk_labels": [...]}`.
+- `models/model_card.json` — model version, feature order, target horizon, risk
+  bands and calibration metadata. The app cross-checks the artifact's packaged
+  metadata against this card and refuses to score if they disagree.
 
 The model expects **20 features**, in model-card order:
 
@@ -219,8 +225,26 @@ Solar radiation (`ALLSKY_SFC_SW_DWN`) is collected for analysis but is not a mod
 The model covers **northern Algeria only** (32.0°–37.5°N, -2.0°–9.0°E on the
 0.5° × 0.625° NASA POWER grid). Cells outside that grid are not scored.
 
-Probabilities are **calibrated on 2021** (the validation year recorded in the model
-card) and are mapped to the risk bands `LOW`, `MODERATE`, `HIGH` and `VERY HIGH`.
+The target is **at least one fire in the grid cell within the next 3 days**
+(`horizon_days = 3`). This differs from the panel's `burned` column, which is a
+same-day detection label used for the observed overlay and retrospective analysis.
+
+Probabilities are **isotonic-calibrated on the 2021 validation year** (training
+2018–2020, test 2022–2024) and are mapped to these risk bands:
+
+| Band | Probability |
+|---|---|
+| LOW | below 1% |
+| MODERATE | 1% – 5% |
+| HIGH | 5% – 15% |
+| VERY HIGH | 15% or more |
+
+The dashboard panel covers 2024–2026, which is newer than the model's test
+period. The app labels those dates as new data; read the probabilities as
+relative risk screening, not as calibrated absolute probabilities for 2024–2026.
+
+The supplied artifact does not include evaluation metrics, so the model card
+records `"metrics": null` rather than reporting numbers from a different model.
 
 Run the test suite from the project root:
 
@@ -229,11 +253,11 @@ python -m pytest -q
 ```
 
 The model was trained with **scikit-learn 1.9.1**, which is pinned in
-`requirements.txt`; loading the artifact with another version can fail. Install the
-development/test dependencies with:
+`requirements.txt`; loading the artifact with another version can fail.
+Install all dependencies (app, notebooks and tests) with:
 
 ```bash
-pip install -r requirements-dev.txt
+pip install -r requirements.txt
 ```
 
 ## Important Considerations

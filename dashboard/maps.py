@@ -7,6 +7,8 @@ with custom scientific styling, legends, and inspection popups.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+
 import folium
 import numpy as np
 import pandas as pd
@@ -23,7 +25,7 @@ from dashboard.config import (
     MAP_ZOOM,
 )
 
-_DEFAULT_RISK_BINS = [0.0, 0.005, 0.02, 0.06, 1.0]
+_DEFAULT_RISK_BINS = [0.0, 0.01, 0.05, 0.15, 1.0]
 _DEFAULT_RISK_LABELS = ["LOW", "MODERATE", "HIGH", "VERY HIGH"]
 _RISK_COLORS = {
     "LOW": COLORS["risk_low"],
@@ -110,6 +112,124 @@ def create_base_map(
         popup="Study Domain: 32.0°–37.5°N, -2.0°–9.0°E",
         tooltip="Project Geographic Extent (Northern Algeria)",
     ).add_to(m)
+
+    return m
+
+
+def _selection_marker_html(color: str) -> str:
+    """Return a self-contained SVG map pin (no external icon font needed)."""
+    return (
+        '<div style="line-height:0;">'
+        f'<svg width="30" height="40" viewBox="0 0 30 40" '
+        'xmlns="http://www.w3.org/2000/svg">'
+        f'<path d="M15 1C7.3 1 1 7.3 1 15c0 10.4 14 24 14 24s14-13.6 14-24'
+        f'C29 7.3 22.7 1 15 1z" fill="{color}" stroke="#FFFFFF" stroke-width="2"/>'
+        '<circle cx="15" cy="15" r="5.2" fill="#FFFFFF"/>'
+        "</svg></div>"
+    )
+
+
+def _selection_marker(
+    selected: tuple[float, float],
+    *,
+    in_area: bool = True,
+) -> folium.Marker:
+    """Build the single selected-location marker."""
+    lat, lon = float(selected[0]), float(selected[1])
+    color = COLORS["risk_very_high"] if in_area else COLORS["text_muted"]
+    suffix = "" if in_area else " • outside the study area"
+    return folium.Marker(
+        location=[lat, lon],
+        icon=folium.DivIcon(
+            html=_selection_marker_html(color),
+            icon_size=(30, 40),
+            icon_anchor=(15, 40),
+            class_name="firewatch-selection-pin",
+        ),
+        tooltip=f"Selected: {lat:.4f}°N, {lon:.4f}°E{suffix}",
+    )
+
+
+def selection_marker_group(
+    selected: tuple[float, float] | None = None,
+    *,
+    in_area: bool = True,
+) -> folium.FeatureGroup | None:
+    """Return the selected-location marker as a dynamic feature group.
+
+    streamlit-folium derives the component identity from a hash of the base
+    map's Leaflet JavaScript.  Keeping the marker out of that script (and in a
+    feature group added on the client) means selecting a new point updates only
+    the marker instead of remounting the map at its default centre and zoom.
+    """
+    if selected is None:
+        return None
+    group = folium.FeatureGroup(name="Selected location")
+    _selection_marker(selected, in_area=in_area).add_to(group)
+    return group
+
+
+def viewport_from_map_data(
+    map_data: Mapping[str, object] | None,
+) -> dict | None:
+    """Normalise the viewport returned by ``st_folium`` for session state.
+
+    The installed streamlit-folium version returns ``center``, ``zoom`` and
+    ``bounds`` when they are requested through ``returned_objects``.  Values are
+    converted to plain JSON-friendly types so they survive Streamlit reruns.
+    """
+    if not map_data:
+        return None
+
+    center = map_data.get("center")
+    zoom = map_data.get("zoom")
+    if not isinstance(center, Mapping):
+        return None
+
+    lat = center.get("lat")
+    lng = center.get("lng", center.get("lon"))
+    if lat is None or lng is None or zoom is None:
+        return None
+
+    viewport: dict = {
+        "center": {"lat": float(lat), "lng": float(lng)},
+        "zoom": int(round(float(zoom))),
+    }
+    bounds = map_data.get("bounds")
+    if isinstance(bounds, Mapping):
+        viewport["bounds"] = dict(bounds)
+    return viewport
+
+
+def render_selection_map(
+    selected: tuple[float, float] | None = None,
+    *,
+    tiles: str = "Light",
+    in_area: bool = True,
+    polygon: Sequence[tuple[float, float]] | None = None,
+) -> folium.Map:
+    """Render the click-to-select study-area map.
+
+    The base map keeps the existing northern-Algeria centre, zoom and model
+    bounding rectangle.  The Algeria boundary is drawn as the selectable area,
+    and at most one marker is placed at the selected point.  No risk circles
+    are drawn here.
+    """
+    m = create_base_map(tiles=tiles)
+
+    if polygon:
+        folium.Polygon(
+            locations=[(float(lat), float(lon)) for lon, lat in polygon],
+            color=COLORS["brand_accent"],
+            weight=1.4,
+            fill=True,
+            fill_color=COLORS["brand_accent"],
+            fill_opacity=0.05,
+            tooltip="Selectable study area: Algerian land inside the model domain",
+        ).add_to(m)
+
+    if selected is not None:
+        _selection_marker(selected, in_area=in_area).add_to(m)
 
     return m
 

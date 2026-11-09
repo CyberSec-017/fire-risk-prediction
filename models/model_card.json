@@ -1,6 +1,7 @@
 {
-  "model_version": "0.1.0",
-  "trained_at": "2026-11-08T22:52:45.946952+00:00",
+  "model_version": "0.2.0",
+  "trained_at": null,
+  "source": "Leader's trained artifact (src/train_baseline.py on main); packaged with model, feature list, horizon and risk bands.",
   "feature_names": [
     "lat_cell",
     "lon_cell",
@@ -27,23 +28,17 @@
   "n_features": 20,
   "feature_set": "full",
   "use_coords": true,
+  "target": "At least one fire in the grid cell within the next 3 days.",
+  "horizon_days": 3,
   "val_year": 2021,
-  "random_state": 42,
-  "metrics": {
-    "pr_auc": 0.15817696977890822,
-    "base_rate": 0.02370573127872398,
-    "brier": 0.022343928073831346,
-    "brier_skill": 0.034559690311293134,
-    "top_decile_fire_share": 0.5256593014967926,
-    "train_rows": 236736,
-    "val_rows": 78840,
-    "test_rows": 236736
-  },
+  "random_state": 0,
+  "metrics": null,
+  "metrics_note": "The supplied artifact does not include evaluation metrics. No metrics are shown rather than reporting numbers from a different model.",
   "risk_bins": [
     0,
-    0.005,
-    0.02,
-    0.06,
+    0.01,
+    0.05,
+    0.15,
     1.0
   ],
   "risk_labels": [
@@ -53,7 +48,6 @@
     "VERY HIGH"
   ],
   "library_versions": {
-    "scikit_learn": "1.9.1",
-    "pandas": "3.1.1"
+    "scikit_learn": "1.9.1"
   }
 }

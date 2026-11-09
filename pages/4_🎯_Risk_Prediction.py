@@ -48,7 +48,7 @@ inject_global_css()
 render_sidebar()
 render_header(
     title="Fire Risk Prediction Engine",
-    subtitle="Decision-support inference using atmospheric parameters, fuel aridity, and seasonal harmonics",
+    subtitle="Decision-support inference using atmospheric parameters, fuel aridity, and seasonal harmonics to estimate fire risk over the next 3 days",
     badge="Inference Pipeline",
 )
 
@@ -389,7 +389,7 @@ if run_predict and model_state != "ERROR":
         if model_state == "REAL":
             probability_line = (
                 "<div style='font-size: 1.05rem; font-weight: 600; "
-                f"color: {COLORS['text_primary']};'>Calibrated probability: "
+                f"color: {COLORS['text_primary']};'>Calibrated 3-day probability: "
                 f"{prob_score * 100:.1f}%</div>"
             )
         else:
@@ -440,6 +440,7 @@ if run_predict and model_state != "ERROR":
                         Environmental Drivers & Condition Assessment
                     </div>
                     <ul style="font-size: 0.84rem; color: {COLORS['text_secondary']}; line-height: 1.7; margin: 0; padding-left: 18px;">
+                        <li><b>Prediction Target:</b> at least one fire in this grid cell within the next 3 days</li>
                         <li><b>Spatial Domain:</b> {in_lat:.3f}°N, {in_lon:.3f}°E on {in_date.strftime('%Y-%m-%d')} (Day of year {doy}) — grid cell {lat_cell:.3f}, {lon_cell:.3f}</li>
                         <li><b>Thermal Forcing:</b> Max Temperature at {v_t2m_max:.1f}°C (7d moving avg: {v_t7:.1f}°C)</li>
                         <li><b>Vapor Pressure & Aridity:</b> Relative Humidity at {v_rh2m:.1f}%, 30-day min humidity at {v_rh30:.1f}%</li>

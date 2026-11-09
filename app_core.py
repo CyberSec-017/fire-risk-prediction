@@ -69,7 +69,7 @@ FALLBACK_FEATURE_NAMES = [
     "rain_30d", "tmax_30d", "rhmin_30d",
     "dry_days", "doy_sin", "doy_cos",
 ]
-FALLBACK_RISK_BINS = [0.0, 0.005, 0.02, 0.06, 1.0]
+FALLBACK_RISK_BINS = [0.0, 0.01, 0.05, 0.15, 1.0]
 FALLBACK_RISK_LABELS = ["LOW", "MODERATE", "HIGH", "VERY HIGH"]
 
 RISK_COLORS = {
@@ -207,6 +207,59 @@ def validate_card(card: Mapping[str, Any]) -> None:
         raise FeatureContractError("Risk bins must start at 0 and end at 1 or above.")
 
 
+def unwrap_model_artifact(payload: Any, card: Mapping[str, Any]) -> Any:
+    """Return the estimator from a bare model or a packaged artifact.
+
+    The leader's artifact is a dict::
+
+        {"model": <estimator>, "features": [...], "horizon_days": 3,
+         "risk_bins": [...], "risk_labels": [...]}
+
+    Older artifacts are a bare estimator.  When a package is supplied, its
+    metadata is cross-checked against the card so a mismatched pair fails loudly
+    instead of silently scoring with the wrong contract.
+    """
+    if not isinstance(payload, dict):
+        return payload
+
+    if "model" not in payload:
+        raise FeatureContractError(
+            "Model artifact is a dict without a 'model' entry."
+        )
+    estimator = payload["model"]
+
+    if "features" in payload:
+        features = [str(name) for name in payload["features"]]
+        if features != list(card["feature_names"]):
+            raise FeatureContractError(
+                "Artifact feature names/order do not match model_card.json."
+            )
+
+    if "risk_bins" in payload:
+        bins = [float(edge) for edge in payload["risk_bins"]]
+        card_bins = [float(edge) for edge in card["risk_bins"]]
+        if bins != card_bins:
+            raise FeatureContractError(
+                "Artifact risk bins do not match model_card.json."
+            )
+
+    if "risk_labels" in payload:
+        labels = [str(label) for label in payload["risk_labels"]]
+        card_labels = [str(label) for label in card["risk_labels"]]
+        if labels != card_labels:
+            raise FeatureContractError(
+                "Artifact risk labels do not match model_card.json."
+            )
+
+    if "horizon_days" in payload and "horizon_days" in card:
+        if int(payload["horizon_days"]) != int(card["horizon_days"]):
+            raise FeatureContractError(
+                "Artifact horizon_days does not match model_card.json."
+            )
+
+    return estimator
+
+
 def validate_model(model: Any, card: Mapping[str, Any]) -> None:
     """Raise FeatureContractError if a loaded model is incompatible with the card."""
     if not hasattr(model, "predict_proba") or not callable(model.predict_proba):
@@ -288,13 +341,25 @@ def load_model_bundle(
         )
 
     try:
-        model = joblib.load(model_path)
+        payload = joblib.load(model_path)
     except Exception as exc:  # noqa: BLE001 - corrupt/unreadable artifact
         return ModelBundle(
             status="ERROR",
             model=None,
             card=card,
             error=f"Could not load model artifact: {exc}",
+            model_path=model_path,
+            card_path=card_path,
+        )
+
+    try:
+        model = unwrap_model_artifact(payload, card)
+    except Exception as exc:  # noqa: BLE001 - packaged metadata disagrees with card
+        return ModelBundle(
+            status="ERROR",
+            model=None,
+            card=card,
+            error=f"Model artifact does not match the model card: {exc}",
             model_path=model_path,
             card_path=card_path,
         )
@@ -752,7 +817,11 @@ def predict_probability(
     bundle: ModelBundle,
     features: pd.DataFrame | Mapping[str, float],
 ) -> float:
-    """Return the calibrated positive-class probability from the real model."""
+    """Return the calibrated probability for the card's target horizon.
+
+    The shipped model predicts at least one fire in the cell within
+    ``horizon_days`` (3) days, not merely on the supplied date.
+    """
     if bundle.status != "REAL" or bundle.model is None:
         raise ModelNotReadyError(
             bundle.error or "The trained model is not available."
@@ -1156,6 +1225,11 @@ def risk_calibration(
     to avoid presenting training-year fit as out-of-sample evidence.  The
     result is a sampled diagnostic, not a replacement for the full test
     metrics in the model card.
+
+    The shipped model predicts fire within ``horizon_days`` days, while the
+    panel's ``burned`` column is a same-day label.  When a horizon greater than
+    one is declared, the observed rate is therefore built from a forward-looking
+    window of that length (right-censored at the end of each cell's series).
     """
     if bundle.status != "REAL" or bundle.card is None:
         return pd.DataFrame(columns=["risk", "n", "predicted", "observed"])
@@ -1172,6 +1246,21 @@ def risk_calibration(
         if not test_frame.empty:
             frame = test_frame
 
+    frame = frame.copy()
+    horizon = max(int(bundle.card.get("horizon_days", 1)), 1)
+    if horizon > 1 and {"lat_cell", "lon_cell", "date"}.issubset(frame.columns):
+        frame = frame.sort_values(["lat_cell", "lon_cell", "date"])
+        frame["observed_target"] = (
+            frame.groupby(["lat_cell", "lon_cell"], sort=False)["burned"]
+            .transform(
+                lambda values: values[::-1]
+                .rolling(horizon, min_periods=1)
+                .max()[::-1]
+            )
+        )
+    else:
+        frame["observed_target"] = frame["burned"]
+
     if len(frame) > sample_n:
         frame = frame.sample(n=sample_n, random_state=random_state)
 
@@ -1183,7 +1272,7 @@ def risk_calibration(
     labels = classify_probabilities(predicted, bundle.card)
 
     scored = pd.DataFrame({
-        "burned": frame["burned"].to_numpy(),
+        "burned": frame["observed_target"].to_numpy(),
         "probability": predicted,
         "risk": labels,
     })
