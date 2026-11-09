@@ -6,3 +6,7 @@ requests
 matplotlib
 seaborn
 jupyter
+streamlit
+plotly
+folium
+streamlit-folium

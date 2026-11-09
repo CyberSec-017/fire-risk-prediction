@@ -1,4 +1,3 @@
-
 # Environnement Python
 .venv/
 venv/
@@ -9,6 +8,11 @@ __pycache__/
 data/raw/
 data/interim/
 data/processed/
+
+# Modèles volumineux
+models/*.pkl
+models/*.joblib
+!models/.gitkeep
 
 # Fichiers temporaires
 .ipynb_checkpoints/
