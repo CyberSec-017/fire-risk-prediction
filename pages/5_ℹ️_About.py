@@ -178,7 +178,7 @@ with tab_pipeline:
 with tab_ml:
     render_section_header(
         title="Machine Learning Evaluation & Rare-Event Protocols",
-        subtitle="Methodological guidelines implemented for training Member 4's predictive model",
+        subtitle="Methodological guidelines implemented for training the wildfire risk model",
     )
 
     st.markdown(

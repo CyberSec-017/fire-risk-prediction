@@ -2,7 +2,8 @@
 FIREWATCH AI — Fire Risk Prediction Cockpit (Module 4).
 
 Operational decision-support interface accepting real-time environmental inputs,
-calculating seasonal harmonics, and interfacing with Member 4's machine learning model.
+calculating seasonal harmonics, and scoring them with the calibrated 20-feature
+wildfire model.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ st.set_page_config(
     layout="wide",
 )
 
+import app_core
 from dashboard.components import (
     inject_global_css,
     render_header,
@@ -33,6 +35,7 @@ from dashboard.model_loader import (
 )
 from dashboard.config import (
     COLORS,
+    PROJECT_ROOT,
     RISK_LEVELS,
     WEATHER_VARIABLES,
     LAT_MIN,
@@ -49,8 +52,54 @@ render_header(
     badge="Inference Pipeline",
 )
 
-# Inspect model status
+# Inspect model status and contract
 model = load_model()
+model_state = model.status
+model_card = model.card or {}
+model_version = model_card.get("model_version", "unknown")
+feature_count = len(MODEL_FEATURES)
+
+try:
+    model_file_label = MODEL_PATH.relative_to(PROJECT_ROOT).as_posix()
+except ValueError:
+    model_file_label = MODEL_PATH.name
+
+state_palette = {
+    "REAL": (COLORS["risk_low_bg"], COLORS["risk_low"]),
+    "DEMO": (COLORS["risk_moderate_bg"], COLORS["risk_moderate"]),
+    "ERROR": (COLORS["risk_very_high_bg"], COLORS["risk_very_high"]),
+}
+state_bg, state_fg = state_palette.get(
+    model_state,
+    (COLORS["surface_subtle"], COLORS["text_secondary"]),
+)
+
+st.markdown(
+    f"""
+    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0 4px 0;">
+        <span style="
+            padding: 3px 10px;
+            border-radius: 999px;
+            background-color: {state_bg};
+            color: {state_fg};
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+        ">MODEL STATE: {model_state}</span>
+        <span style="font-size: 0.8rem; color: {COLORS['text_secondary']};">
+            Model v{model_version} • {feature_count} features • <code>{model_file_label}</code>
+        </span>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+if model_state == "ERROR":
+    render_callout(
+        title="Model Load Error",
+        message=model.error or "The trained model artifact could not be loaded.",
+        variant="danger",
+    )
 
 # Scenario Presets
 render_section_header(
@@ -99,7 +148,7 @@ st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
 # Form Layout: 3 Organized Fieldsets
 render_section_header(
     title="Environmental Feature Inputs",
-    subtitle="Configure the 19 predictors expected by the project classification pipeline",
+    subtitle="Configure the 20 predictors expected by the trained wildfire model",
 )
 
 # Row 1: Spatial & Temporal Coordinates
@@ -136,6 +185,16 @@ with col_c3:
         value=datetime.date.today(),
         help="Used to compute day-of-year seasonal harmonics (doy_sin, doy_cos)",
     )
+
+lat_cell, lon_cell = app_core.snap_to_grid(in_lat, in_lon)
+st.markdown(
+    f"""
+    <div style="font-size:0.8rem; color:{COLORS['text_secondary']}; margin-top:-2px;">
+        Grid cell used: lat {lat_cell:.3f}, lon {lon_cell:.3f}
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 doy = in_date.timetuple().tm_yday
 doy_sin = float(np.sin(2 * np.pi * doy / 365.25))
@@ -189,10 +248,11 @@ with col_a3:
         step=0.2,
     )
     v_rad = st.number_input(
-        "Solar Radiation: ALLSKY (MJ/m²)",
+        "Solar Radiation: ALLSKY (MJ/m²) — not used by the model",
         min_value=0.0,
         value=preset_data["ALLSKY_SFC_SW_DWN"] if preset_data else 25.0,
         step=1.0,
+        help="Display only. Solar radiation is not one of the 20 model features.",
     )
 
 with col_a4:
@@ -231,14 +291,15 @@ with st.expander("3. Antecedent Drought & Fuel Indicators (7-day, 14-day, 30-day
         v_rh14 = st.number_input("rhmin_14d", value=preset_data["rhmin_14d"] if preset_data else 20.0, step=1.0)
         v_rh30 = st.number_input("rhmin_30d", value=preset_data["rhmin_30d"] if preset_data else 18.0, step=1.0)
 
-# Build feature dictionary
-input_feature_map = {
+# Build feature values (solar is display-only and deliberately excluded).
+feature_values = {
+    "lat_cell": lat_cell,
+    "lon_cell": lon_cell,
     "T2M": v_t2m,
     "T2M_MAX": v_t2m_max,
     "RH2M": v_rh2m,
     "WS2M": v_ws2m,
     "PRECTOTCORR": v_prec,
-    "ALLSKY_SFC_SW_DWN": v_rad,
     "GWETROOT": v_gwet,
     "rain_7d": v_r7,
     "rain_14d": v_r14,
@@ -254,8 +315,63 @@ input_feature_map = {
     "doy_cos": doy_cos,
 }
 
+# Model-card order, not widget order.
+feature_order = list(model_card.get("feature_names", MODEL_FEATURES))
+input_feature_map = {name: feature_values[name] for name in feature_order}
+
+# Non-blocking warnings: study-area geometry and model-period provenance.
+area_info = app_core.check_training_area(in_lat, in_lon, in_date)
+period_note = app_core.data_period_note(in_date)
+
+if not area_info["in_box"]:
+    render_callout(
+        title="Outside the Model's Study Area",
+        message=(
+            area_info["warnings"][0]
+            if area_info["warnings"]
+            else "The snapped grid cell is outside the model's study area."
+        ),
+        variant="warning",
+    )
+
+note_palette = {
+    "training period": (COLORS["brand_subtle"], COLORS["brand_accent"]),
+    "calibration year": (COLORS["risk_moderate_bg"], COLORS["risk_moderate"]),
+    "original test period": (COLORS["risk_low_bg"], COLORS["risk_low"]),
+    "new data, never used for this model": (
+        COLORS["risk_high_bg"],
+        COLORS["risk_high"],
+    ),
+}
+note_bg, note_fg = note_palette.get(
+    period_note,
+    (COLORS["surface_subtle"], COLORS["text_secondary"]),
+)
+st.markdown(
+    f"""
+    <div style="
+        display: inline-block;
+        margin-top: 4px;
+        padding: 3px 9px;
+        border-radius: 999px;
+        background-color: {note_bg};
+        color: {note_fg};
+        font-size: 0.72rem;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+    ">
+        Model period: {period_note}
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
-run_predict = st.button("Evaluate Wildfire Risk", use_container_width=True)
+run_predict = st.button(
+    "Evaluate Wildfire Risk",
+    use_container_width=True,
+    disabled=model_state == "ERROR",
+)
 
 # Prediction Result or Waiting Staging State
 render_section_header(
@@ -263,114 +379,81 @@ render_section_header(
     subtitle="Model evaluation output with contributing factors and advisory classification",
 )
 
-if run_predict:
-    if model is None:
-        st.markdown(
-            f"""
-            <div style="
-                background-color: {COLORS['surface_white']};
-                border: 1px solid {COLORS['border_light']};
-                border-left: 4px solid {COLORS['risk_moderate']};
-                border-radius: 8px;
-                padding: 24px;
-                box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
-            ">
-                <div style="display: flex; align-items: flex-start; gap: 14px;">
-                    <div style="
-                        width: 36px;
-                        height: 36px;
-                        border-radius: 50%;
-                        background-color: {COLORS['risk_moderate_bg']};
-                        color: {COLORS['risk_moderate']};
-                        font-weight: 700;
-                        font-size: 16px;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        flex-shrink: 0;
-                    ">!</div>
-                    <div>
-                        <div style="font-size: 1rem; font-weight: 600; color: {COLORS['text_primary']};">
-                            Inference Staging Ready — Awaiting Member 4 Model Artifact
-                        </div>
-                        <p style="font-size: 0.86rem; color: {COLORS['text_secondary']}; line-height: 1.6; margin: 6px 0 14px 0;">
-                            The prediction pipeline has successfully verified the input vector across all <b>19 predictors</b> (7 weather variables + 10 rolling drought indicators + 2 seasonal harmonics).
-                            The system is fully wired to invoke <code>.predict()</code> and <code>.predict_proba()</code> as soon as Member 4 exports the trained model.
-                        </p>
-                        <div style="
-                            background-color: {COLORS['surface_subtle']};
-                            border: 1px solid {COLORS['border_light']};
-                            border-radius: 6px;
-                            padding: 10px 14px;
-                            font-size: 0.8rem;
-                        ">
-                            <b>Integration Target:</b> <code>models/fire_risk_model.pkl</code><br>
-                            <b>Expected Input Shape:</b> (1, 19) • Target: <code>burned ∈ {{0, 1}}</code>
-                        </div>
+if run_predict and model_state != "ERROR":
+    try:
+        inference = predict_fire_risk(model, input_feature_map)
+        risk_cat = inference["risk_level"]
+        prob_score = inference["probability"]
+        cat_cfg = RISK_LEVELS.get(risk_cat, RISK_LEVELS["Moderate"])
+
+        if model_state == "REAL":
+            probability_line = (
+                "<div style='font-size: 1.05rem; font-weight: 600; "
+                f"color: {COLORS['text_primary']};'>Calibrated probability: "
+                f"{prob_score * 100:.1f}%</div>"
+            )
+        else:
+            probability_line = (
+                "<div style='font-size: 1.0rem; font-weight: 600; "
+                f"color: {COLORS['text_primary']};'>Demo heuristic, not a trained "
+                f"model ({prob_score * 100:.1f}%)</div>"
+            )
+
+        col_r1, col_r2 = st.columns([1.1, 1.9])
+
+        with col_r1:
+            st.markdown(
+                f"""
+                <div style="
+                    background-color: {cat_cfg['bg']};
+                    border: 1px solid {cat_cfg['color']}50;
+                    border-top: 4px solid {cat_cfg['color']};
+                    border-radius: 8px;
+                    padding: 22px;
+                    text-align: center;
+                ">
+                    <div style="font-size: 0.76rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: {cat_cfg['color']};">
+                        Risk Assessment
+                    </div>
+                    <div style="font-size: 1.8rem; font-weight: 700; color: {cat_cfg['color']}; margin: 6px 0;">
+                        {risk_cat} Risk
+                    </div>
+                    {probability_line}
+                    <div style="font-size: 0.78rem; color: {COLORS['text_secondary']}; margin-top: 8px; line-height: 1.4;">
+                        {cat_cfg['description']}
                     </div>
                 </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    else:
-        try:
-            inference = predict_fire_risk(model, input_feature_map)
-            risk_cat = inference["risk_level"]
-            prob_score = inference["probability"]
-            cat_cfg = RISK_LEVELS.get(risk_cat, RISK_LEVELS["Moderate"])
+                """,
+                unsafe_allow_html=True,
+            )
 
-            col_r1, col_r2 = st.columns([1.1, 1.9])
-
-            with col_r1:
-                st.markdown(
-                    f"""
-                    <div style="
-                        background-color: {cat_cfg['bg']};
-                        border: 1px solid {cat_cfg['color']}50;
-                        border-top: 4px solid {cat_cfg['color']};
-                        border-radius: 8px;
-                        padding: 22px;
-                        text-align: center;
-                    ">
-                        <div style="font-size: 0.76rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: {cat_cfg['color']};">
-                            Risk Assessment
-                        </div>
-                        <div style="font-size: 1.8rem; font-weight: 700; color: {cat_cfg['color']}; margin: 6px 0;">
-                            {risk_cat} Risk
-                        </div>
-                        {"<div style='font-size: 1.05rem; font-weight: 600; color: " + COLORS['text_primary'] + ";'>Calibrated Probability: " + f"{prob_score * 100:.1f}%</div>" if prob_score is not None else ""}
-                        <div style="font-size: 0.78rem; color: {COLORS['text_secondary']}; margin-top: 8px; line-height: 1.4;">
-                            {cat_cfg['description']}
-                        </div>
+        with col_r2:
+            st.markdown(
+                f"""
+                <div style="
+                    background-color: {COLORS['surface_white']};
+                    border: 1px solid {COLORS['border_light']};
+                    border-radius: 8px;
+                    padding: 20px 24px;
+                ">
+                    <div style="font-size: 0.9rem; font-weight: 600; color: {COLORS['text_primary']}; margin-bottom: 8px;">
+                        Environmental Drivers & Condition Assessment
                     </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-
-            with col_r2:
-                st.markdown(
-                    f"""
-                    <div style="
-                        background-color: {COLORS['surface_white']};
-                        border: 1px solid {COLORS['border_light']};
-                        border-radius: 8px;
-                        padding: 20px 24px;
-                    ">
-                        <div style="font-size: 0.9rem; font-weight: 600; color: {COLORS['text_primary']}; margin-bottom: 8px;">
-                            Environmental Drivers & Condition Assessment
-                        </div>
-                        <ul style="font-size: 0.84rem; color: {COLORS['text_secondary']}; line-height: 1.7; margin: 0; padding-left: 18px;">
-                            <li><b>Spatial Domain:</b> {in_lat:.3f}°N, {in_lon:.3f}°E on {in_date.strftime('%Y-%m-%d')} (Day of year {doy})</li>
-                            <li><b>Thermal Forcing:</b> Max Temperature at {v_t2m_max:.1f}°C (7d moving avg: {v_t7:.1f}°C)</li>
-                            <li><b>Vapor Pressure & Aridity:</b> Relative Humidity at {v_rh2m:.1f}%, 30-day min humidity at {v_rh30:.1f}%</li>
-                            <li><b>Antecedent Moisture Deficit:</b> {v_dry:.0f} dry days, 14d rainfall total at {v_r14:.1f} mm, root soil moisture at {v_gwet:.2f}</li>
-                        </ul>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-        except Exception as exc:
-            st.error(f"Inference pipeline execution error: {exc}")
+                    <ul style="font-size: 0.84rem; color: {COLORS['text_secondary']}; line-height: 1.7; margin: 0; padding-left: 18px;">
+                        <li><b>Spatial Domain:</b> {in_lat:.3f}°N, {in_lon:.3f}°E on {in_date.strftime('%Y-%m-%d')} (Day of year {doy}) — grid cell {lat_cell:.3f}, {lon_cell:.3f}</li>
+                        <li><b>Thermal Forcing:</b> Max Temperature at {v_t2m_max:.1f}°C (7d moving avg: {v_t7:.1f}°C)</li>
+                        <li><b>Vapor Pressure & Aridity:</b> Relative Humidity at {v_rh2m:.1f}%, 30-day min humidity at {v_rh30:.1f}%</li>
+                        <li><b>Antecedent Moisture Deficit:</b> {v_dry:.0f} dry days, 14d rainfall total at {v_r14:.1f} mm, root soil moisture at {v_gwet:.2f}</li>
+                        <li><b>Display-only Variable:</b> Solar radiation at {v_rad:.1f} MJ/m² (not used by the model)</li>
+                        <li><b>Model Artifact:</b> v{model_version} • {feature_count} features • <code>{model_file_label}</code></li>
+                    </ul>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+    except Exception as exc:
+        st.error(f"Inference pipeline execution error: {exc}")
+elif model_state == "ERROR":
+    st.info("Inference is disabled until the model artifact loads successfully.")
 else:
     st.info("Select or adjust environmental parameters above and click 'Evaluate Wildfire Risk' to trigger inference.")

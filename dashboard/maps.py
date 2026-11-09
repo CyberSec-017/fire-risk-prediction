@@ -23,6 +23,56 @@ from dashboard.config import (
     MAP_ZOOM,
 )
 
+_DEFAULT_RISK_BINS = [0.0, 0.005, 0.02, 0.06, 1.0]
+_DEFAULT_RISK_LABELS = ["LOW", "MODERATE", "HIGH", "VERY HIGH"]
+_RISK_COLORS = {
+    "LOW": COLORS["risk_low"],
+    "MODERATE": COLORS["risk_moderate"],
+    "HIGH": COLORS["risk_high"],
+    "VERY HIGH": COLORS["risk_very_high"],
+}
+_RISK_DISPLAY = {
+    "LOW": "Low",
+    "MODERATE": "Moderate",
+    "HIGH": "High",
+    "VERY HIGH": "Very High",
+}
+
+# Keyless basemaps.  The tile names are the user-facing selectbox labels.
+_ESRI_ATTR = "Tiles © Esri"
+_ESRI_LIGHT = (
+    "https://server.arcgisonline.com/ArcGIS/rest/services/"
+    "Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}"
+)
+_ESRI_DARK = (
+    "https://server.arcgisonline.com/ArcGIS/rest/services/"
+    "Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}"
+)
+_TILE_LAYERS = {
+    "Light": (_ESRI_LIGHT, _ESRI_ATTR, "Light"),
+    "Dark": (_ESRI_DARK, _ESRI_ATTR, "Dark"),
+    "OpenStreetMap": ("OpenStreetMap", None, "OpenStreetMap"),
+}
+_DEFAULT_TILE = "Light"
+
+_OUTSIDE_RISK = "OUTSIDE"
+_OUTSIDE_COLOR = COLORS["text_muted"]
+_OUTSIDE_TOOLTIP = "Outside the model's study area (no prediction)"
+_OUTSIDE_LEGEND = "Outside the model's study area (no prediction)"
+
+
+def _build_tile_layer(tiles: str) -> folium.TileLayer:
+    """Return a keyless tile layer for a user-facing basemap name."""
+    template, attr, name = _TILE_LAYERS.get(
+        tiles, _TILE_LAYERS[_DEFAULT_TILE]
+    )
+    return folium.TileLayer(
+        tiles=template,
+        attr=attr,
+        name=name,
+        no_wrap=True,
+    )
+
 
 def _get_fire_color(days: int) -> str:
     """Return scientific risk color based on frequency of active fire days."""
@@ -38,16 +88,17 @@ def _get_fire_color(days: int) -> str:
 
 def create_base_map(
     zoom: int = MAP_ZOOM,
-    tiles: str = "CartoDB positron",
+    tiles: str = "Light",
 ) -> folium.Map:
     """Create a clean base map centered over northern Algeria."""
     m = folium.Map(
         location=[MAP_CENTER_LAT, MAP_CENTER_LON],
         zoom_start=zoom,
-        tiles=tiles,
+        tiles=None,
         control_scale=True,
         prefer_canvas=True,
     )
+    _build_tile_layer(tiles).add_to(m)
 
     # Draw study area bounding box
     folium.Rectangle(
@@ -66,7 +117,7 @@ def create_base_map(
 def render_grid_detection_map(
     df: pd.DataFrame,
     max_cells: int = 1500,
-    tiles: str = "CartoDB positron",
+    tiles: str = "Light",
 ) -> folium.Map:
     """Render aggregated fire occurrences per NASA POWER grid cell."""
     m = create_base_map(tiles=tiles)
@@ -133,7 +184,7 @@ def render_grid_detection_map(
 
 def render_density_heatmap(
     df: pd.DataFrame,
-    tiles: str = "CartoDB positron",
+    tiles: str = "Light",
 ) -> folium.Map:
     """Render a kernel density heatmap of cumulative fire activity."""
     m = create_base_map(tiles=tiles)
@@ -170,7 +221,7 @@ def render_density_heatmap(
 def render_cluster_map(
     df: pd.DataFrame,
     max_samples: int = 2500,
-    tiles: str = "CartoDB positron",
+    tiles: str = "Light",
 ) -> folium.Map:
     """Render incident markers grouped dynamically via MarkerCluster."""
     m = create_base_map(tiles=tiles)
@@ -200,8 +251,163 @@ def render_cluster_map(
     return m
 
 
-def _inject_clean_legend(m: folium.Map) -> None:
+def _risk_label(probability: float, card: dict | None) -> str:
+    """Return the card's risk label for one probability."""
+    source = card or {}
+    bins = [float(edge) for edge in source.get("risk_bins", _DEFAULT_RISK_BINS)]
+    labels = [
+        str(label).upper()
+        for label in source.get("risk_labels", _DEFAULT_RISK_LABELS)
+    ]
+    index = int(np.searchsorted(np.asarray(bins), float(probability), side="left") - 1)
+    index = max(0, min(index, len(labels) - 1))
+    return labels[index]
+
+
+def _risk_legend_entries(card: dict | None) -> list[tuple[str, str]]:
+    """Build legend entries from the model card's bins and labels."""
+    source = card or {}
+    bins = [float(edge) for edge in source.get("risk_bins", _DEFAULT_RISK_BINS)]
+    labels = [
+        str(label).upper()
+        for label in source.get("risk_labels", _DEFAULT_RISK_LABELS)
+    ]
+
+    entries: list[tuple[str, str]] = []
+    for index, label in enumerate(labels):
+        low = bins[index] if index < len(bins) else 0.0
+        high = bins[index + 1] if index + 1 < len(bins) else 1.0
+        if index == len(labels) - 1:
+            range_text = f"{low * 100:.1f}%+"
+        else:
+            range_text = f"{low * 100:.1f}% – {high * 100:.1f}%"
+        entries.append((
+            _RISK_COLORS.get(label, COLORS["brand_primary"]),
+            f"{_RISK_DISPLAY.get(label, label.title())} ({range_text})",
+        ))
+    entries.append((_OUTSIDE_COLOR, _OUTSIDE_LEGEND))
+    return entries
+
+
+def render_risk_map(
+    scores: pd.DataFrame,
+    card: dict | None = None,
+    tiles: str = "Light",
+    show_observed: bool = False,
+) -> folium.Map:
+    """Render per-cell predicted fire risk using the model-card bands."""
+    m = create_base_map(tiles=tiles)
+    legend_entries = _risk_legend_entries(card)
+
+    if scores is None or scores.empty:
+        _inject_clean_legend(
+            m, title="Predicted Fire Risk", entries=legend_entries
+        )
+        return m
+
+    required = {"lat_cell", "lon_cell", "probability"}
+    missing = sorted(required - set(scores.columns))
+    if missing:
+        raise ValueError(f"Risk scores are missing column(s): {missing}.")
+
+    frame = scores.copy()
+    frame["probability"] = pd.to_numeric(frame["probability"], errors="coerce")
+    frame = frame.dropna(subset=["lat_cell", "lon_cell"])
+
+    # Cells that are not on the model's training grid are never scored or
+    # coloured by risk; they are drawn neutral and excluded from the legend's
+    # risk bands.
+    outside_flags = frame["probability"].isna()
+    if "in_model_area" in frame.columns:
+        outside_flags = outside_flags | ~frame["in_model_area"].fillna(False).astype(bool)
+    if "risk" in frame.columns:
+        outside_flags = outside_flags | (
+            frame["risk"].astype(str).str.upper() == _OUTSIDE_RISK
+        )
+
+    for is_outside, (_, row) in zip(outside_flags.to_numpy(), frame.iterrows()):
+        lat_cell = float(row["lat_cell"])
+        lon_cell = float(row["lon_cell"])
+
+        if is_outside:
+            folium.CircleMarker(
+                location=[lat_cell, lon_cell],
+                radius=6,
+                color=_OUTSIDE_COLOR,
+                fill=True,
+                fill_color=_OUTSIDE_COLOR,
+                fill_opacity=0.55,
+                weight=1,
+                tooltip=_OUTSIDE_TOOLTIP,
+            ).add_to(m)
+            continue
+
+        probability = float(row["probability"])
+        if "risk" in frame.columns and pd.notna(row["risk"]):
+            band = str(row["risk"]).upper()
+        else:
+            band = _risk_label(probability, card)
+        color = _RISK_COLORS.get(band, COLORS["brand_primary"])
+        display = _RISK_DISPLAY.get(band, band.title())
+
+        folium.CircleMarker(
+            location=[lat_cell, lon_cell],
+            radius=6,
+            color=color,
+            fill=True,
+            fill_color=color,
+            fill_opacity=0.68,
+            weight=1,
+            tooltip=(
+                f"{lat_cell:.2f}°N, {lon_cell:.2f}°E • "
+                f"{probability * 100:.1f}% • {display}"
+            ),
+        ).add_to(m)
+
+    if show_observed and "burned" in frame.columns:
+        burned = pd.to_numeric(frame["burned"], errors="coerce").fillna(0).astype(int)
+        for _, row in frame[burned == 1].iterrows():
+            lat_cell = float(row["lat_cell"])
+            lon_cell = float(row["lon_cell"])
+            folium.CircleMarker(
+                location=[lat_cell, lon_cell],
+                radius=7,
+                color="#000000",
+                fill=False,
+                weight=2,
+                tooltip=f"Observed fire • {lat_cell:.2f}°N, {lon_cell:.2f}°E",
+            ).add_to(m)
+
+    _inject_clean_legend(
+        m, title="Predicted Fire Risk", entries=legend_entries
+    )
+    return m
+
+
+def _inject_clean_legend(
+    m: folium.Map,
+    title: str = "Fire Activity Density",
+    entries: list[tuple[str, str]] | None = None,
+) -> None:
     """Add a professional floating legend to the Folium map."""
+    if entries is None:
+        entries = [
+            (COLORS["risk_low"], "1 – 4 fire-days (Low)"),
+            (COLORS["risk_moderate"], "5 – 12 fire-days (Moderate)"),
+            (COLORS["risk_high"], "13 – 25 fire-days (High)"),
+            (COLORS["risk_very_high"], "> 25 fire-days (Very High)"),
+        ]
+
+    rows_html = "\n".join(
+        f"""
+        <div style="display:flex; align-items:center; gap:6px; margin:3px 0;">
+            <div style="width:10px; height:10px; border-radius:50%; background-color:{color};"></div>
+            <span>{text}</span>
+        </div>
+        """
+        for color, text in entries
+    )
+
     legend_html = f"""
     <div style="
         position: fixed;
@@ -218,24 +424,9 @@ def _inject_clean_legend(m: folium.Map) -> None:
         box-shadow: 0 1px 4px rgba(15,23,42,0.08);
     ">
         <div style="font-weight: 600; color:{COLORS['text_primary']}; margin-bottom: 6px;">
-            Fire Activity Density
+            {title}
         </div>
-        <div style="display:flex; align-items:center; gap:6px; margin:3px 0;">
-            <div style="width:10px; height:10px; border-radius:50%; background-color:{COLORS['risk_low']};"></div>
-            <span>1 – 4 fire-days (Low)</span>
-        </div>
-        <div style="display:flex; align-items:center; gap:6px; margin:3px 0;">
-            <div style="width:10px; height:10px; border-radius:50%; background-color:{COLORS['risk_moderate']};"></div>
-            <span>5 – 12 fire-days (Moderate)</span>
-        </div>
-        <div style="display:flex; align-items:center; gap:6px; margin:3px 0;">
-            <div style="width:10px; height:10px; border-radius:50%; background-color:{COLORS['risk_high']};"></div>
-            <span>13 – 25 fire-days (High)</span>
-        </div>
-        <div style="display:flex; align-items:center; gap:6px; margin:3px 0;">
-            <div style="width:10px; height:10px; border-radius:50%; background-color:{COLORS['risk_very_high']};"></div>
-            <span>> 25 fire-days (Very High)</span>
-        </div>
+        {rows_html}
     </div>
     """
     m.get_root().html.add_child(folium.Element(legend_html))

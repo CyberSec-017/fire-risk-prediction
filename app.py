@@ -48,7 +48,7 @@ render_header(
 df = load_fire_panel()
 panel_available = df is not None and not df.empty
 ml_model = load_model()
-model_status_text = "Production Model Integrated" if ml_model is not None else "Model Staging Ready (Pending Member 4)"
+model_status_text = "Production Model Integrated" if ml_model is not None else "Model Staging Ready"
 
 # Executive Briefing Card
 st.markdown(

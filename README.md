@@ -201,6 +201,41 @@ Final dataset:
 
 `data/processed/fire_panel.parquet`
 
+## Fire Risk Model
+
+The trained model is stored in:
+
+- `models/fire_model.joblib` — calibrated scikit-learn classifier.
+- `models/model_card.json` — model version, feature order, risk bands and calibration metadata.
+
+The model expects **20 features**, in model-card order:
+
+`lat_cell`, `lon_cell`, `T2M`, `T2M_MAX`, `RH2M`, `WS2M`, `PRECTOTCORR`, `GWETROOT`,
+`rain_7d`, `tmax_7d`, `rhmin_7d`, `rain_14d`, `tmax_14d`, `rhmin_14d`,
+`rain_30d`, `tmax_30d`, `rhmin_30d`, `dry_days`, `doy_sin`, `doy_cos`.
+
+Solar radiation (`ALLSKY_SFC_SW_DWN`) is collected for analysis but is not a model feature.
+
+The model covers **northern Algeria only** (32.0°–37.5°N, -2.0°–9.0°E on the
+0.5° × 0.625° NASA POWER grid). Cells outside that grid are not scored.
+
+Probabilities are **calibrated on 2021** (the validation year recorded in the model
+card) and are mapped to the risk bands `LOW`, `MODERATE`, `HIGH` and `VERY HIGH`.
+
+Run the test suite from the project root:
+
+```bash
+python -m pytest -q
+```
+
+The model was trained with **scikit-learn 1.9.1**, which is pinned in
+`requirements.txt`; loading the artifact with another version can fail. Install the
+development/test dependencies with:
+
+```bash
+pip install -r requirements-dev.txt
+```
+
 ## Important Considerations
 
 ### Class Imbalance

@@ -1,0 +1,59 @@
+{
+  "model_version": "0.1.0",
+  "trained_at": "2026-11-08T22:52:45.946952+00:00",
+  "feature_names": [
+    "lat_cell",
+    "lon_cell",
+    "T2M",
+    "T2M_MAX",
+    "RH2M",
+    "WS2M",
+    "PRECTOTCORR",
+    "GWETROOT",
+    "rain_7d",
+    "tmax_7d",
+    "rhmin_7d",
+    "rain_14d",
+    "tmax_14d",
+    "rhmin_14d",
+    "rain_30d",
+    "tmax_30d",
+    "rhmin_30d",
+    "dry_days",
+    "doy_sin",
+    "doy_cos"
+  ],
+  "feature_hash": "63e5895979fa4521f7dd650ea1e82aff8e553265b9c89ffeeceb8178629a56da",
+  "n_features": 20,
+  "feature_set": "full",
+  "use_coords": true,
+  "val_year": 2021,
+  "random_state": 42,
+  "metrics": {
+    "pr_auc": 0.15817696977890822,
+    "base_rate": 0.02370573127872398,
+    "brier": 0.022343928073831346,
+    "brier_skill": 0.034559690311293134,
+    "top_decile_fire_share": 0.5256593014967926,
+    "train_rows": 236736,
+    "val_rows": 78840,
+    "test_rows": 236736
+  },
+  "risk_bins": [
+    0,
+    0.005,
+    0.02,
+    0.06,
+    1.0
+  ],
+  "risk_labels": [
+    "LOW",
+    "MODERATE",
+    "HIGH",
+    "VERY HIGH"
+  ],
+  "library_versions": {
+    "scikit_learn": "1.9.1",
+    "pandas": "3.1.1"
+  }
+}

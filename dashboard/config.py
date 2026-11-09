@@ -21,7 +21,8 @@ MODELS_DIR = PROJECT_ROOT / "models"
 FIRE_PANEL_PATH = PROCESSED_DIR / "fire_panel.parquet"
 FIRES_DAILY_PATH = INTERIM_DIR / "fires_daily.parquet"
 FIRMS_RAW_PATH = RAW_DIR / "firms_raw.csv"
-MODEL_PATH = MODELS_DIR / "fire_risk_model.pkl"
+MODEL_PATH = MODELS_DIR / "fire_model.joblib"
+MODEL_CARD_PATH = MODELS_DIR / "model_card.json"
 
 # ---------------------------------------------------------------------------
 # Study Area & Spatial Resolution
@@ -82,6 +83,17 @@ ENGINEERED_FEATURES = [
     "rain_7d", "rain_14d", "rain_30d",
     "tmax_7d", "tmax_14d", "tmax_30d",
     "rhmin_7d", "rhmin_14d", "rhmin_30d",
+    "dry_days", "doy_sin", "doy_cos",
+]
+
+# Exact model-card feature order.  This is the model input contract, not the
+# list of weather variables available for display (which still includes solar).
+MODEL_FEATURES = [
+    "lat_cell", "lon_cell",
+    "T2M", "T2M_MAX", "RH2M", "WS2M", "PRECTOTCORR", "GWETROOT",
+    "rain_7d", "tmax_7d", "rhmin_7d",
+    "rain_14d", "tmax_14d", "rhmin_14d",
+    "rain_30d", "tmax_30d", "rhmin_30d",
     "dry_days", "doy_sin", "doy_cos",
 ]
 

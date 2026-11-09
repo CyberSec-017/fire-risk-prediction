@@ -1,6 +1,6 @@
 # Models Directory
-Place Member 4's trained model artifact here:
-- Filename: `fire_risk_model.pkl`
-- Expected interface: Scikit-learn estimator compatible with `.predict()` and optionally `.predict_proba()`
-- Features: 19 predictors (see `dashboard/config.py` and `src/train_baseline.py`)
+Trained model artifacts:
+- `models/fire_model.joblib` — calibrated scikit-learn classifier
+- `models/model_card.json` — feature order, risk bands and calibration metadata
 
+The model expects 20 features (see `models/model_card.json`).

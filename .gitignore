@@ -12,6 +12,8 @@ data/processed/
 # Modèles volumineux
 models/*.pkl
 models/*.joblib
+!models/fire_model.joblib
+!models/model_card.json
 !models/.gitkeep
 
 # Fichiers temporaires

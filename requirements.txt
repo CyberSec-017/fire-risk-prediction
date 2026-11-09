@@ -1,6 +1,6 @@
 pandas
 numpy
-scikit-learn
+scikit-learn==1.9.1
 pyarrow
 requests
 matplotlib
