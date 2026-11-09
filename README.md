@@ -54,7 +54,13 @@ fire-risk-project/
 ├── notebooks/
 │   └── exploration.ipynb        <- plots and sanity checks for the report
 ├── tests/
-│   └── test_pipeline.py         <- regression tests (pytest)
+│   ├── test_pipeline.py         <- pipeline regression tests (pytest)
+│   ├── test_app_core.py         <- dashboard logic tests (pytest)
+│   └── test_app_smoke.py        <- Streamlit startup smoke test
+├── app.py                       <- Streamlit dashboard (UI)
+├── app_core.py                  <- dashboard logic: model loading + features
+├── .streamlit/
+│   └── config.toml              <- dark dashboard theme
 ├── requirements.txt
 ├── requirements-dev.txt
 └── README.md
@@ -92,7 +98,39 @@ python train_baseline.py     # trains and evaluates a baseline model
 Each step reads the previous step's output from `data/`, so you can
 re-run any single step without repeating earlier ones.
 
-### 4. Explore and write up
+### 4. Run the dashboard
+
+```bash
+streamlit run app.py
+```
+
+The app is a single-page prediction dashboard. The map, weather inputs and
+risk result are always on screen:
+
+- **Sidebar** — model status badge, version/training metadata, the
+  manual-vs-live prediction-mode toggle, and a **Reload model** button.
+- **Location & weather** — choose a preset or custom coordinates and a date,
+  then enter manual weather or fetch 120 days of NASA POWER history.
+- **Risk assessment** — the calibrated risk card, the selected grid cell on
+  the map, the feature vector used, and an optional sensitivity sweep.
+
+Manual mode re-scores instantly as the sliders move. Live mode fetches NASA
+POWER only when you press **Fetch & predict**, so the page never blocks on the
+network during unrelated changes.
+
+The status pill makes the model state explicit:
+
+| State | Meaning |
+| --- | --- |
+| `REAL MODEL` | `fire_model.joblib` and `model_card.json` exist and agree. |
+| `DEMO MODE` | The model artifact is missing; a transparent weather heuristic is used. |
+| `MODEL ERROR` | The artifact/card is corrupt or the contract does not match; predictions are disabled. |
+
+The app reads the authoritative feature contract from
+`data/processed/model_card.json`, so it stays aligned with the training
+pipeline without duplicating the feature list.
+
+### 5. Explore and write up
 
 Open `notebooks/exploration.ipynb` for plots (fire count over time, a
 risk map, feature distributions) — these become your report's figures.
@@ -111,11 +149,11 @@ risk map, feature distributions) — these become your report's figures.
 - **Model contract**: `train_baseline.py` writes `data/processed/model_card.json`
   with the exact feature names, their order, a feature hash and the test
   metrics. Any serving layer should check these before loading the model.
-- **Serving note**: the current model uses 20 features including
-  `lat_cell`/`lon_cell`. The Streamlit app on the `main` branch builds 18
-  features without coordinates, so align its `config.FEATURES` and
-  `features.py` with `model_card.json` (or retrain with `USE_COORDS = False`)
-  before copying the model to the project root.
+- **Serving contract**: the dashboard reads `model_card.json` and builds the
+  20-feature vector in the card's order, including `lat_cell`/`lon_cell`. It
+  validates the feature hash and the model's `feature_names_in_` before
+  enabling real predictions, so a mismatched artifact pair fails loudly
+  instead of silently producing bad scores.
 - **Known limitations** (worth a paragraph in your report): POWER's
   ~50km grid can't capture local terrain/microclimate effects; FIRMS
   can miss small or short-lived fires under cloud cover.
