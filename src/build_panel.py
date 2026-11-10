@@ -17,12 +17,11 @@ Usage:
 
 import numpy as np
 import pandas as pd
-from config import POWER_CACHE
 
 from config import (
     PARAMETERS, START_YEAR, END_YEAR,
     POWER_CACHE, FIRES_DAILY, FIRE_PANEL, generate_tiles,
-    H
+    H,INTERIM_DIR
 )
 
 TILES = generate_tiles()
@@ -59,7 +58,7 @@ def _parse_power_csv(path, param: str) -> pd.DataFrame:
     out = df[["LAT", "LON", "date", value_col]].copy()
     out.columns = ["lat_cell", "lon_cell", "date", param]
     out[param] = out[param].replace(-999, np.nan)
-    out["lat_cell"] = out["lat_cell"].round(4)
+    out["lon_cell"] = out["lon_cell"].round(4) + 0.0
     out["lon_cell"] = out["lon_cell"].round(4)
     return out
 
@@ -107,6 +106,11 @@ def load_power() -> pd.DataFrame:
 
 def label_panel(panel: pd.DataFrame) -> pd.DataFrame:
     fires = pd.read_parquet(FIRES_DAILY)
+    keys = panel[["lat_cell", "lon_cell"]].drop_duplicates()
+    chk = fires.merge(keys, on=["lat_cell", "lon_cell"], how="left", indicator=True)
+    in_range = fires["date"].between(panel["date"].min(), panel["date"].max())
+    print(f"  fire-days: {len(fires):,} | outside grid: {(chk['_merge'] == 'left_only').sum():,}"
+          f" | outside dates: {(~in_range).sum():,}")
 
     # Left join: POWER already has every (cell, date), so rows with no
     # matching fire simply get NaN here -- that NaN becomes our 0 label.
@@ -149,6 +153,7 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
     wet = df["PRECTOTCORR"] > 1.0
     streak_id = wet.groupby([df["lat_cell"], df["lon_cell"]]).cumsum()
     df["dry_days"] = df.groupby(["lat_cell", "lon_cell", streak_id]).cumcount()
+    df["dry_days"] = df["dry_days"].clip(upper=60)
 
     # Seasonality as two smooth cyclic features instead of raw day-of-year.
     doy = df["date"].dt.dayofyear
@@ -161,6 +166,12 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
 def main():
     print("Loading and merging POWER weather grid ...")
     panel = load_power()
+    
+    ex = pd.read_csv(INTERIM_DIR / "excluded_cells.csv")
+    ex["_drop"] = True
+    panel = panel.merge(ex, on=["lat_cell", "lon_cell"], how="left")
+    panel = panel[panel["_drop"].isna()].drop(columns="_drop")
+    print(f"  excluded {len(ex)} heat-source cells from the study area")
 
     print("Joining fire labels ...")
     panel = label_panel(panel)
@@ -171,6 +182,7 @@ def main():
     g = panel.groupby(["lat_cell", "lon_cell"], sort=False)["burned"]
     panel["target"] = g.transform(lambda s: s[::-1].rolling(H).max()[::-1].shift(-1))
     panel = panel.dropna(subset=["target"])   # last H days of each cell have no future
+    panel = panel[panel["date"] >= panel["date"].min() + pd.Timedelta(days=60)]
 
     panel.to_parquet(FIRE_PANEL, index=False)
     print(f"Saved {FIRE_PANEL} ({len(panel):,} rows, {panel.shape[1]} columns)")

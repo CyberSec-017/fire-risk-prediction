@@ -1,0 +1,26 @@
+# Environnement Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Données
+data/raw/
+data/interim/
+data/processed/
+
+# Modèles volumineux
+models/*.pkl
+models/*.joblib
+!models/fire_model.joblib
+!models/model_card.json
+!models/.gitkeep
+
+# Fichiers temporaires
+.ipynb_checkpoints/
+*.log
+
+# Secrets et clés API
+.env
+.env.*
+!.env.example

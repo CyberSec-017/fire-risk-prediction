@@ -28,15 +28,20 @@ from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.frozen import FrozenEstimator
 from sklearn.metrics import average_precision_score, brier_score_loss
+import joblib
+import numpy as np
+from sklearn.isotonic import IsotonicRegression
+from sklearn.linear_model import LogisticRegression
 
-from config import FIRE_PANEL,H
+
+from config import FIRE_PANEL,H,ROOT
 
 # ---------------------------------------------------------------------------
 # Experiment settings
 # ---------------------------------------------------------------------------
 USE_COORDS = True
 FEATURE_SET = "full"     # "full" or "geo_season"
-VAL_YEAR = 2021          # calibration year; test = all years after it
+VAL_YEAR = 2022         # calibration year; test = all years after it
 LABEL = "target"
 # Risk levels on the calibrated probability (tune on the validation table).
 RISK_BINS = [0, 0.01, 0.05, 0.15, 1.0]
@@ -49,6 +54,7 @@ if not USE_COORDS:
 
 def load_data():
     df = pd.read_parquet(FIRE_PANEL).dropna(subset=["T2M"])
+    df = df.drop(columns=["burned", "n_detections", "total_frp"])
     if FEATURE_SET == "geo_season":
         features = ["lat_cell", "lon_cell", "doy_sin", "doy_cos"]
     else:
@@ -68,7 +74,7 @@ def time_split(df: pd.DataFrame):
 
 def climatology_proba(train, test):
     clim = (train.assign(m=train.date.dt.month)
-                 .groupby(["lat_cell", "lon_cell", "m"])["burned"].mean()
+                 .groupby(["lat_cell", "lon_cell", "m"])[LABEL].mean()
                  .rename("clim"))
     te = test.assign(m=test.date.dt.month).join(clim, on=["lat_cell", "lon_cell", "m"])
     return te["clim"].fillna(0).to_numpy()
@@ -79,6 +85,18 @@ def risk_level_table(data: pd.DataFrame, p) -> pd.DataFrame:
     return (data.assign(level=levels)
                 .groupby("level", observed=True)[LABEL]
                 .agg(n="size", fire_rate="mean"))
+
+def calib_slope_intercept(y, p):
+    p = np.clip(p, 1e-6, 1 - 1e-6)
+    z = np.log(p / (1 - p)).reshape(-1, 1)
+    lr = LogisticRegression(C=np.inf).fit(z, y)
+    return lr.coef_[0][0], lr.intercept_[0]
+
+def ece(y, p, bins=10):
+    g = (pd.DataFrame({"y": y, "p": p})
+           .groupby(pd.qcut(p, bins, duplicates="drop"), observed=True)
+           .agg(n=("y", "size"), y=("y", "mean"), p=("p", "mean")))
+    return (g.n * (g.y - g.p).abs()).sum() / g.n.sum()    
 
 
 def main():
@@ -104,7 +122,7 @@ def main():
     p_val = cal.predict_proba(val[features])[:, 1]
     proba = cal.predict_proba(test[features])[:, 1]
     raw = model.predict_proba(test[features])[:, 1]
-    print(f"  val PR-AUC: {average_precision_score(val['burned'], p_val):.4f}")
+    print(f"  val PR-AUC: {average_precision_score(val[LABEL], p_val):.4f}")
 
     # --- risk levels -------------------------------------------------------
     print("\nRisk levels (validation)")
@@ -117,6 +135,10 @@ def main():
     print("\nObserved vs predicted, per test year")
     print(chk.groupby(chk.date.dt.year)
              .agg(observed=(LABEL, "mean"), predicted=("pred", "mean")))
+    
+    for y_, g in chk.groupby(chk.date.dt.year):
+        s, i = calib_slope_intercept(g[LABEL].to_numpy(), g["pred"].to_numpy())
+        print(y_, f"slope {s:.2f}  intercept {i:+.2f}  ECE {ece(g[LABEL].to_numpy(), g['pred'].to_numpy()):.4f}")
 
     deciles = pd.qcut(proba, 10, duplicates="drop")
     print("\nObserved vs predicted, per risk decile")
@@ -124,7 +146,7 @@ def main():
              .agg(n=(LABEL, "size"), predicted=("pred", "mean"),
                   observed=(LABEL, "mean")))
 
-    top = raw >= pd.Series(proba).quantile(0.9)
+    top = raw >= np.quantile(raw, 0.9)
     top_share = test.loc[top, LABEL].sum() / test[LABEL].sum()
 
     # --- headline metrics --------------------------------------------------
@@ -139,13 +161,34 @@ def main():
     clim_brier = brier_score_loss(test[LABEL], p_clim)
     clim_skill = 1 - clim_brier / (base_rate * (1 - base_rate))
     cmp = test.assign(model=raw, clim=p_clim)
-    for y, g in cmp.groupby(cmp.date.dt.year):
-        print(y, "model", round(average_precision_score(g[LABEL], g["model"]), 4),
-                 "| climatology", round(average_precision_score(g[LABEL], g["clim"]), 4))
-    
-    yr = test["date"].dt.year.to_numpy()
-    yb = test["burned"].to_numpy()
+    top_c = p_clim >= np.quantile(p_clim, 0.9)
+    print(f"  Fires in top 10% (climatology): {test.loc[top_c, LABEL].sum() / test[LABEL].sum():.1%}")
 
+    for yr_, g in cmp.groupby(cmp.date.dt.year):
+        print(yr_, "model", round(average_precision_score(g[LABEL], g["model"]), 4),
+                 "| climatology", round(average_precision_score(g[LABEL], g["clim"]), 4))
+        
+    iso = IsotonicRegression(out_of_bounds="clip", y_min=0, y_max=1)
+    iso.fit(climatology_proba(train, val), val[LABEL])
+    p_clim_cal = iso.predict(p_clim)
+    clim_cal_brier = brier_score_loss(test[LABEL], p_clim_cal)
+    print(f"  Brier vs calibrated climatology: {1 - brier / clim_cal_brier:+.2%}")
+    
+    
+
+     # ---- 2) bootstrap block (new) ----
+    rng = np.random.default_rng(0)
+    y = test[LABEL].to_numpy()
+    wk = test["date"].dt.to_period("W").astype(str).to_numpy()
+    weeks = np.unique(wk)
+    where = {w: np.where(wk == w)[0] for w in weeks}
+    d_ap, d_br = [], []
+    for _ in range(300):
+        ii = np.concatenate([where[w] for w in rng.choice(weeks, len(weeks))])
+        d_ap.append(average_precision_score(y[ii], raw[ii]) - average_precision_score(y[ii], p_clim[ii]))
+        d_br.append(brier_score_loss(y[ii], p_clim_cal[ii]) - brier_score_loss(y[ii], proba[ii]))
+    print("PR-AUC gain, 95% CI:", np.percentile(d_ap, [2.5, 97.5]).round(4))
+    print("Brier gain, 95% CI:", np.percentile(d_br, [2.5, 97.5]).round(5))
     
     print(f"  Climatology PR-AUC: {clim_pr:.4f}")
     print(f"  Climatology Brier skill: {clim_skill:.4f}")
@@ -154,6 +197,14 @@ def main():
     print(f"  Brier score       : {brier:.4f}")
     print(f"  Brier skill       : {brier_skill:.4f}   (0 = no better than base rate)")
     print(f"  Fires in top 10%  : {top_share:.1%}")
+    
+    model_path = ROOT / "models" / "fire_model.joblib"
+    model_path.parent.mkdir(exist_ok=True)
+    if FEATURE_SET == "full" and USE_COORDS:
+        model_path = ROOT / "models" / "fire_model.joblib"
+        model_path.parent.mkdir(exist_ok=True)
+        joblib.dump({"model": cal, "features": features, "horizon_days": H,
+                     "risk_bins": RISK_BINS, "risk_labels": RISK_LABELS}, model_path)
 
 
 if __name__ == "__main__":

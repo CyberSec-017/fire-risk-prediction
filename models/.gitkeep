@@ -1,0 +1,6 @@
+# Models Directory
+Trained model artifacts:
+- `models/fire_model.joblib` — calibrated scikit-learn classifier
+- `models/model_card.json` — feature order, risk bands and calibration metadata
+
+The model expects 20 features (see `models/model_card.json`).

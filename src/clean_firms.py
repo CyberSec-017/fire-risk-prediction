@@ -14,8 +14,8 @@ Usage:
 
 import pandas as pd
 
-from config import FIRMS_RAW, FIRES_DAILY, LAT_STEP, LON_STEP
-
+from config import FIRMS_RAW, FIRES_DAILY, LAT_STEP, LON_STEP, INTERIM_DIR
+WINTER_MAX_SHARE = 0.10   # set from the checks.py table
 
 def load_raw() -> pd.DataFrame:
     if not FIRMS_RAW.exists():
@@ -47,7 +47,7 @@ def filter_quality(df: pd.DataFrame) -> pd.DataFrame:
     # confidence: VIIRS uses l/n/h (low/nominal/high); MODIS uses 0-100.
     if "confidence" in df.columns:
         conf = df["confidence"]
-        if conf.dtype == object:
+        if not pd.api.types.is_numeric_dtype(conf):
             df = df[conf.str.lower().isin(["n", "h"])]
         else:
             df = df[conf >= 50]
@@ -61,8 +61,8 @@ def filter_quality(df: pd.DataFrame) -> pd.DataFrame:
 
 def snap_to_grid(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    df["lat_cell"] = ((df["latitude"] / LAT_STEP).round() * LAT_STEP).round(4)
-    df["lon_cell"] = ((df["longitude"] / LON_STEP).round() * LON_STEP).round(4)
+    df["lat_cell"] = ((df["latitude"] / LAT_STEP).round() * LAT_STEP).round(4) + 0.0
+    df["lon_cell"] = ((df["longitude"] / LON_STEP).round() * LON_STEP).round(4) + 0.0
     df["date"] = pd.to_datetime(df["acq_date"])
     return df
 
@@ -75,14 +75,18 @@ def collapse_to_daily(df: pd.DataFrame) -> pd.DataFrame:
           .reset_index()
     )
 
-    # Remove cells that burn on more than half of all days in range --
-    # these are persistent industrial heat sources, not wildfires.
-    days_span = (daily["date"].max() - daily["date"].min()).days + 1
-    per_cell = daily.groupby(["lat_cell", "lon_cell"]).size()
-    persistent = per_cell[per_cell > 0.5 * days_span].index
+    # Wildfires are seasonal; industrial heat sources burn all year. Judge each
+    # cell by how often it burns in winter, using pre-test years only.
+    ref = daily[daily["date"] < "2022-01-01"]
+    days = pd.date_range(daily["date"].min(), "2021-12-31")
+    n_winter = days.month.isin([12, 1, 2]).sum()
+    wdays = ref[ref["date"].dt.month.isin([12, 1, 2])].groupby(["lat_cell", "lon_cell"]).size()
+    persistent = (wdays / n_winter)[lambda s: s > WINTER_MAX_SHARE].index
 
+    pd.DataFrame(list(persistent), columns=["lat_cell", "lon_cell"]).to_csv(
+        INTERIM_DIR / "excluded_cells.csv", index=False)
     if len(persistent):
-        print(f"  dropping {len(persistent)} persistent hotspot cell(s)")
+        print(f"  excluding {len(persistent)} year-round heat-source cell(s)")
         idx = daily.set_index(["lat_cell", "lon_cell"]).index
         daily = daily[~idx.isin(persistent)]
 
