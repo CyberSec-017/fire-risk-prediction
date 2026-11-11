@@ -441,7 +441,7 @@ else:
     with st.expander("Inspect & Export Filtered Geospatial Dataset", expanded=False):
         st.write(f"Displaying top 500 records from the currently filtered {total_fire_records:,} fire-day observations.")
         st.dataframe(
-            filtered_fires.head(500).sort_values("date", ascending=False),
+            filtered_fires.sort_values("date", ascending=False).head(500),
             use_container_width=True,
             hide_index=True,
         )
