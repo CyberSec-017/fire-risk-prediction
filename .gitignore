@@ -9,6 +9,9 @@ data/raw/
 data/interim/
 data/processed/
 
+# Impact assessment: manual source downloads (large, never committed)
+data/impact/raw/
+
 # Modèles volumineux
 models/*.pkl
 models/*.joblib

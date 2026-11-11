@@ -1,0 +1,16 @@
+# Build-only dependencies for the Wildfire Impact Assessment module (Stage 2).
+#
+# These packages are used ONLY by the offline scripts in scripts/ that turn the
+# manually downloaded WorldCover / WorldPop / OpenStreetMap inputs in
+# data/impact/raw/ into small parquet artifacts.
+#
+# They are deliberately NOT added to requirements.txt: the Streamlit runtime
+# and the fire-risk model never import them.
+#
+# Install with:
+#     python -m pip install -r requirements-impact.txt
+geopandas
+shapely
+pyproj
+rasterio
+pyogrio
