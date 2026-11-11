@@ -336,7 +336,11 @@ def render_sidebar() -> None:
                     Lon: -2.0° → 9.0°E
                 </div>
                 <div style="font-size: 0.72rem; color: #94A3B8; margin-top: 4px;">
-                    Temporal: 2024 – 2026
+                    Domain: 209 Grid Cells (0.5° × 0.625°)
+                </div>
+                <div style="margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.08); display: flex; align-items: center; gap: 6px; font-size: 0.72rem; color: #34D399;">
+                    <span style="display:inline-block; width:6px; height:6px; border-radius:50%; background-color:#10B981; box-shadow: 0 0 6px #10B981;"></span>
+                    <span>ML Pipeline: Calibrated HGB</span>
                 </div>
             </div>
             """,
@@ -544,3 +548,24 @@ def render_data_unavailable(dataset_name: str = "dataset") -> None:
         """,
         unsafe_allow_html=True,
     )
+
+
+def render_risk_badge(level: str, probability: float | None = None) -> str:
+    """Return an HTML snippet for a sleek, accessible risk badge."""
+    level_norm = str(level).strip().upper()
+    badge_colors = {
+        "LOW": {"bg": "#E8F5E9", "text": "#1E7E34", "border": "#A3D9A5"},
+        "MODERATE": {"bg": "#FEF3C7", "text": "#92400E", "border": "#FCD34D"},
+        "HIGH": {"bg": "#FFEDD5", "text": "#C2410C", "border": "#FDBA74"},
+        "VERY HIGH": {"bg": "#FEE2E2", "text": "#B91C1C", "border": "#FCA5A5"},
+    }
+    cfg = badge_colors.get(level_norm, {"bg": "#F1F5F9", "text": "#475569", "border": "#CBD5E1"})
+    prob_str = f" ({probability:.1%})" if probability is not None else ""
+    return (
+        f'<span style="display:inline-flex; align-items:center; gap:5px; '
+        f'background-color:{cfg["bg"]}; color:{cfg["text"]}; border:1px solid {cfg["border"]}; '
+        f'padding:2px 8px; border-radius:9999px; font-size:0.75rem; font-weight:600; letter-spacing:0.02em;">'
+        f'<span style="width:6px; height:6px; border-radius:50%; background-color:{cfg["text"]};"></span>'
+        f'{level.title()}{prob_str}</span>'
+    )
+
