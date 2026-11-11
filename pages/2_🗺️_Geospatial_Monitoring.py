@@ -248,13 +248,10 @@ if not is_risk_layer:
             & (filtered_fires["date"].dt.date <= end_date)
         ]
 
+    lon_col = "lon_sub" if "lon_sub" in filtered_fires.columns else "lon_cell"
     filtered_fires = filtered_fires[
-        (filtered_fires["lat_cell"].between(lat_sub[0], lat_sub[1]))
-        & (
-            filtered_fires["lon_sub"].between(lon_sub[0], lon_sub[1])
-            if "lon_sub" in filtered_fires.columns
-            else filtered_fires["lon_cell"].between(lon_sub[0], lon_sub[1])
-        )
+        filtered_fires["lat_cell"].between(lat_sub[0], lat_sub[1])
+        & filtered_fires[lon_col].between(lon_sub[0], lon_sub[1])
     ]
 
 if is_risk_layer:
