@@ -14,7 +14,7 @@ Usage:
 
 import pandas as pd
 
-from config import FIRMS_RAW, FIRES_DAILY, LAT_STEP, LON_STEP, INTERIM_DIR
+from config import FIRMS_RAW, FIRES_DAILY, LAT_STEP, LON_STEP, INTERIM_DIR, RAW_DIR
 WINTER_MAX_SHARE = 0.10   # set from the checks.py table
 
 def load_raw() -> pd.DataFrame:
