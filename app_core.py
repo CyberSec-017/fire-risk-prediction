@@ -82,7 +82,7 @@ RISK_DISPLAY = {
     "LOW": "Low",
     "MODERATE": "Moderate",
     "HIGH": "High",
-    "VERY HIGH": "Extreme",
+    "VERY HIGH": "Very High",
 }
 
 FEATURE_DESCRIPTIONS = {
@@ -288,7 +288,12 @@ def load_model_bundle(
         )
 
     try:
-        model = joblib.load(model_path)
+        loaded = joblib.load(model_path)
+        # Handle both raw estimators and bundle dictionaries
+        if isinstance(loaded, dict) and "model" in loaded:
+            model = loaded["model"]
+        else:
+            model = loaded
     except Exception as exc:  # noqa: BLE001 - corrupt/unreadable artifact
         return ModelBundle(
             status="ERROR",
