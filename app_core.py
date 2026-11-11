@@ -82,7 +82,7 @@ RISK_DISPLAY = {
     "LOW": "Low",
     "MODERATE": "Moderate",
     "HIGH": "High",
-    "VERY HIGH": "Very High",
+    "VERY HIGH": "Extreme",
 }
 
 FEATURE_DESCRIPTIONS = {
