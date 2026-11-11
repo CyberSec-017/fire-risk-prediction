@@ -8,10 +8,10 @@ All paths are relative to the repository root:
 
 ```text
 data/impact/raw/
-├── ESA_WorldCover_10m_2021_v200_N30W003_Map.tif
+├── ESA_WorldCover_10m_2021_v200_N30W003_Map.tif (optional, 12 tiles)
 ├── ... (eleven more WorldCover tiles)
 ├── dza_ppp_2020_UNadj_constrained.tif
-├── algeria-latest-free.shp/
+├── algeria-latest-free.shp/ (or dated e.g. algeria-261110-free.shp/)
 │   ├── gis_osm_buildings_a_free_1.shp
 │   ├── gis_osm_places_free_1.shp
 │   ├── gis_osm_pois_free_1.shp
@@ -28,7 +28,13 @@ box with a margin.
 
 ---
 
-## 1. ESA WorldCover 2021 v200 (12 tiles, ~2–4 GB total)
+## 1. ESA WorldCover 2021 v200 (optional: 12 tiles, ~2–4 GB total)
+
+WorldCover is **optional**. If these tiles are absent, the build proceeds with
+WorldPop + OSM only: land-cover columns (`lc_*`) and `fuel_area_km2` are recorded
+as `NaN`, and the Impact Exposure Index (IEI) is computed using renormalized
+population and infrastructure weights ($0.35/0.65$ and $0.30/0.65$).
+However, **if downloaded, all 12 tiles must be present**; partial tile coverage fails loudly.
 
 Product page: <https://esa-worldcover.org/en/data-access>
 
@@ -167,7 +173,8 @@ unzip -o data/impact/raw/algeria-latest-free.shp.zip \
 
 The build needs these four shapefiles (with their `.dbf`, `.shx`, `.prj`
 sidecars), which the Geofabrik archive places inside
-`data/impact/raw/algeria-latest-free.shp/`:
+`data/impact/raw/algeria-latest-free.shp/` (or a dated folder like
+`data/impact/raw/algeria-261110-free.shp/`):
 
 ```text
 gis_osm_roads_free_1.shp

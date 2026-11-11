@@ -126,3 +126,35 @@ def test_observed_detections_are_not_labelled_burned_area():
     assert "Confirmed burned area — Not available (phase 2)" in body
     assert "confirmed damage" not in body.lower()
     assert "people affected" not in body.lower()
+
+
+def test_page_environment_tab_and_severity_without_fuel(tmp_path):
+    import shutil
+    import pandas as pd
+    from impact import config as impact_config
+
+    # Copy fixture files into tmp_path
+    for item in FIXTURE.iterdir():
+        if item.is_file():
+            shutil.copy(item, tmp_path / item.name)
+
+    # Set landcover and fuel columns to NaN in cell_exposure
+    exp_path = tmp_path / impact_config.CELL_EXPOSURE_PATH.name
+    frame = pd.read_parquet(exp_path)
+    for col in impact_config.LC_AREA_COLUMNS.values():
+        frame[col] = float("nan")
+    frame["fuel_area_km2"] = float("nan")
+    frame.to_parquet(exp_path, index=False)
+
+    app = run_page(tmp_path)
+    assert not app.exception
+    # Environment tab is still present
+    assert [tab.label for tab in app.tabs] == TAB_LABELS
+    body = rendered_markdown(app)
+
+    # Environment tab shows Not available and WorldCover not ingested
+    assert "Environmental Exposure Not Available" in body
+    assert "WorldCover not ingested" in body
+
+    # Overview and Report state severity was computed without fuel component
+    assert "Severity was computed without the fuel component" in body

@@ -453,10 +453,47 @@ def test_resolve_required_sources_lists_every_missing_file(build, tmp_path):
     with pytest.raises(build.MissingSourceError) as info:
         build.resolve_required_sources(raw)
     message = str(info.value)
-    assert "ESA_WorldCover_10m_2021_v200_N30W003_Map.tif" in message
+    # WorldCover is optional, so WorldPop and OSM are listed as missing
     assert build.WORLDPOP_FILENAME in message
     assert "gis_osm_roads_free_1.shp" in message
     assert "DATA_DOWNLOAD.md" in message
+
+
+def test_resolve_required_sources_rejects_partial_worldcover(build, tmp_path):
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    # Write only 1 tile out of 12 -> must fail loudly
+    (raw / "ESA_WorldCover_10m_2021_v200_N30W003_Map.tif").write_bytes(b"tile")
+    with pytest.raises(build.BuildError, match="Partial WorldCover coverage detected"):
+        build.resolve_required_sources(raw)
+
+
+def test_resolve_required_sources_without_worldcover(build, tmp_path):
+    raw = tmp_path / "raw"
+    osm = raw / build.OSM_FOLDER
+    osm.mkdir(parents=True)
+    (raw / build.WORLDPOP_FILENAME).write_bytes(b"pop")
+    for name in build.OSM_REQUIRED:
+        (osm / name).write_bytes(b"osm")
+
+    sources = build.resolve_required_sources(raw)
+    assert len(sources.worldcover) == 0
+    assert sources.worldpop.name == build.WORLDPOP_FILENAME
+    assert sources.osm_roads.name == "gis_osm_roads_free_1.shp"
+    assert len(sources.required_files()) == 5
+
+
+def test_resolve_required_sources_accepts_dated_geofabrik_folder(build, tmp_path):
+    raw = tmp_path / "raw"
+    osm = raw / "algeria-261110-free.shp"
+    osm.mkdir(parents=True)
+    (raw / build.WORLDPOP_FILENAME).write_bytes(b"pop")
+    for name in build.OSM_REQUIRED:
+        (osm / name).write_bytes(b"osm")
+
+    sources = build.resolve_required_sources(raw)
+    assert sources.osm_folder_name == "algeria-261110-free.shp"
+    assert sources.osm_roads.name == "gis_osm_roads_free_1.shp"
 
 
 def test_resolve_required_sources_with_synthetic_files(build, tmp_path):
@@ -747,3 +784,115 @@ def test_run_build_rejects_checksum_mismatch(build, tmp_path):
             with_rings=False,
         )
     assert not (tmp_path / "out").exists()
+
+
+def test_run_build_without_worldcover(build, tmp_path, monkeypatch):
+    raw = tmp_path / "raw"
+    osm = raw / "algeria-261110-free.shp"
+    osm.mkdir(parents=True)
+    (raw / build.WORLDPOP_FILENAME).write_bytes(b"population")
+    for name in build.OSM_REQUIRED:
+        (osm / name).write_bytes(name.encode("utf-8"))
+
+    checksums_path = raw / build.CHECKSUM_FILENAME
+    sources = build.resolve_required_sources(raw)
+    build.write_checksums(raw, sources.all_files(), checksums_path)
+
+    cells = build.cells_from_panel(
+        pd.DataFrame({"lat_cell": [32.0, 32.0], "lon_cell": [-1.875, -1.25]})
+    )
+
+    def _with_coordinates(frame: pd.DataFrame) -> pd.DataFrame:
+        return frame.merge(cells, on="cell_id", how="left", validate="one_to_one")
+
+    population = _with_coordinates(_population(cells))
+    ring_rows = []
+    for cell in cells.itertuples():
+        for radius in config.RING_DISTANCES_KM:
+            ring_rows.append(
+                {
+                    "lat_cell": cell.lat_cell,
+                    "lon_cell": cell.lon_cell,
+                    "ring_km": float(radius),
+                    "population": 1_000.0 * radius,
+                }
+            )
+    population_rings = pd.DataFrame(ring_rows)
+
+    roads = _infrastructure(cells)[["cell_id", "road_km_total"]].copy()
+    for column in build.ROAD_CLASS_COLUMNS.values():
+        roads[column] = 1.0
+    buildings = _infrastructure(cells)[
+        ["cell_id", "building_count", "building_footprint_km2"]
+    ].copy()
+    critical_counts = _infrastructure(cells)[["cell_id", "critical_count_total"]].copy()
+    for column in build.CRITICAL_CLASS_COLUMNS.values():
+        critical_counts[column] = 1.0
+
+    settlements = pd.DataFrame(
+        {
+            "lat_cell": cells["lat_cell"].to_numpy(),
+            "lon_cell": cells["lon_cell"].to_numpy(),
+            "settlement_name": ["A", "B"],
+            "population": [100.0, 200.0],
+            "distance_km": [0.0, 1.0],
+            "cell_id": cells["cell_id"].to_numpy(),
+        }
+    )
+    settlement_counts = pd.DataFrame(
+        {
+            "cell_id": cells["cell_id"].to_numpy(),
+            "settlement_count": [1.0, 1.0],
+            "settlement_population": [100.0, 200.0],
+        }
+    )
+    assets = pd.DataFrame(
+        {
+            "lat_cell": cells["lat_cell"].to_numpy(),
+            "lon_cell": cells["lon_cell"].to_numpy(),
+            "category": ["hospital", "school"],
+            "asset_name": ["Clinic A", "School B"],
+            "cell_id": cells["cell_id"].to_numpy(),
+        }
+    )
+
+    monkeypatch.setattr(build, "cells_for_build", lambda **_: cells.copy())
+    monkeypatch.setattr(
+        build, "read_worldpop_cell_totals", lambda *_, **__: population
+    )
+    monkeypatch.setattr(
+        build, "read_worldpop_ring_totals", lambda *_, **__: population_rings
+    )
+    monkeypatch.setattr(build, "read_osm_roads", lambda *_, **__: roads)
+    monkeypatch.setattr(build, "read_osm_buildings", lambda *_, **__: buildings)
+    monkeypatch.setattr(
+        build, "read_osm_pois", lambda *_, **__: (assets, critical_counts)
+    )
+    monkeypatch.setattr(
+        build,
+        "read_osm_settlements",
+        lambda *_, **__: (settlements, settlement_counts),
+    )
+
+    out = tmp_path / "out"
+    manifest = build.run_build(
+        raw_dir=raw,
+        out_dir=out,
+        checksums_path=checksums_path,
+        with_rings=False,
+    )
+
+    # Verify manifest records WorldCover as not ingested
+    wc_source = [s for s in manifest["sources"] if s["name"] == build.SOURCE_METADATA["worldcover"]["name"]][0]
+    assert wc_source["status"] == "not ingested"
+    assert "not downloaded" in wc_source["reason"]
+
+    # Verify severity was computed with pop+infra and renormalized weights
+    assert manifest["severity"]["components_used"] == ["pop", "infra"]
+    assert "0.35/0.65" in manifest["severity"]["method"]
+
+    # Verify cell_exposure has NaN landcover and NaN fuel_area_km2
+    cell_exposure = pd.read_parquet(out / config.CELL_EXPOSURE_PATH.name)
+    assert cell_exposure["lc_tree_km2"].isna().all()
+    assert cell_exposure["fuel_area_km2"].isna().all()
+    assert cell_exposure["pop_cell"].notna().all()

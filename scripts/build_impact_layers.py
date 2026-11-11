@@ -571,6 +571,7 @@ class ResolvedSources:
     admin_adm1: Path | None = None
     admin_adm2: Path | None = None
     ghsl: Path | None = None
+    osm_folder_name: str = OSM_FOLDER
 
     def required_files(self) -> tuple[Path, ...]:
         return (
@@ -599,6 +600,18 @@ def _find_file(raw_dir: Path, filename: str) -> Path | None:
     return matches[0] if matches else None
 
 
+def _find_osm_folder(raw_dir: Path) -> Path | None:
+    """Locate an unzipped OSM shapefile folder (dated snapshot or default)."""
+    candidates = sorted(raw_dir.glob("algeria-*-free.shp")) + sorted(raw_dir.glob("algeria-latest-free.shp"))
+    for cand in candidates:
+        if cand.is_dir():
+            return cand
+    for sub in sorted(raw_dir.iterdir()):
+        if sub.is_dir() and (sub / "gis_osm_roads_free_1.shp").is_file():
+            return sub
+    return None
+
+
 def _find_optional(raw_dir: Path, patterns: Sequence[str]) -> Path | None:
     for pattern in patterns:
         direct = raw_dir / pattern
@@ -619,13 +632,26 @@ def resolve_required_sources(raw_dir: Path) -> ResolvedSources:
         )
 
     missing: list[str] = []
-    worldcover: list[Path] = []
-    for name in expected_worldcover_files():
+    
+    # WorldCover tiles: optional if completely absent; partial presence fails loudly.
+    all_wc_tiles = expected_worldcover_files()
+    worldcover_found: list[Path] = []
+    worldcover_missing: list[str] = []
+    for name in all_wc_tiles:
         found = _find_file(raw_dir, name)
         if found is None:
-            missing.append(name)
+            worldcover_missing.append(name)
         else:
-            worldcover.append(found)
+            worldcover_found.append(found)
+
+    if 0 < len(worldcover_found) < len(all_wc_tiles):
+        raise BuildError(
+            f"Partial WorldCover coverage detected: found {len(worldcover_found)} of "
+            f"{len(all_wc_tiles)} required tiles. Missing {len(worldcover_missing)} tile(s):\n  - "
+            + "\n  - ".join(worldcover_missing)
+            + "\nPartial coverage is worse than none: either download all 12 tiles or none. "
+            "The build refuses to use partial land-cover data."
+        )
 
     worldpop_candidates = (
         WORLDPOP_FILENAME,
@@ -635,11 +661,17 @@ def resolve_required_sources(raw_dir: Path) -> ResolvedSources:
     if worldpop is None:
         missing.append(WORLDPOP_FILENAME)
 
+    osm_folder = _find_osm_folder(raw_dir)
+    osm_folder_name = osm_folder.name if osm_folder is not None else OSM_FOLDER
+    osm_search_root = osm_folder if osm_folder is not None else raw_dir
+
     osm_paths: dict[str, Path] = {}
     for name in OSM_REQUIRED:
-        found = _find_file(raw_dir, name)
+        found = _find_file(osm_search_root, name)
+        if found is None and osm_search_root != raw_dir:
+            found = _find_file(raw_dir, name)
         if found is None:
-            missing.append(f"{OSM_FOLDER}/{name}")
+            missing.append(f"{osm_folder_name}/{name}")
         else:
             osm_paths[name] = found
 
@@ -648,7 +680,7 @@ def resolve_required_sources(raw_dir: Path) -> ResolvedSources:
 
     return ResolvedSources(
         raw_dir=raw_dir,
-        worldcover=tuple(sorted(worldcover)),
+        worldcover=tuple(sorted(worldcover_found)),
         worldpop=worldpop,
         osm_roads=osm_paths["gis_osm_roads_free_1.shp"],
         osm_buildings=osm_paths["gis_osm_buildings_a_free_1.shp"],
@@ -659,6 +691,7 @@ def resolve_required_sources(raw_dir: Path) -> ResolvedSources:
         ghsl=_find_optional(
             raw_dir, ("GHSL_BUILT_S*.tif", "GHS_BUILT_S*.tif", "*GHSL*BUILT*.tif")
         ),
+        osm_folder_name=osm_folder_name,
     )
 
 
@@ -807,6 +840,7 @@ def build_manifest(
     thresholds: Sequence[float],
     artifacts: Mapping[str, Mapping[str, Any]],
     study_area: Mapping[str, Any],
+    components_used: Sequence[str] = ("fuel", "pop", "infra"),
     generated_at: str | None = None,
 ) -> dict[str, Any]:
     """Assemble the JSON-serialisable provenance manifest."""
@@ -821,6 +855,9 @@ def build_manifest(
     timestamp = generated_at or (
         datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     )
+    comp_list = list(components_used)
+    is_fuel_missing = comp_list == ["pop", "infra"]
+
     return {
         "schema_version": MANIFEST_SCHEMA_VERSION,
         "generated_at": timestamp,
@@ -838,16 +875,33 @@ def build_manifest(
         "severity": {
             "tier_labels": list(severity.TIER_LABELS),
             "tier_thresholds": list(frozen),
+            "components_used": comp_list,
             "method": (
                 "Fixed quantiles (0.20, 0.40, 0.60, 0.80) of the study-area "
-                "Impact Exposure Index distribution; frozen at build time."
+                "Impact Exposure Index distribution (computed without fuel component: "
+                "pop+infra only; weights renormalized: pop 0.35/0.65, infra 0.30/0.65); "
+                "frozen at build time."
+                if is_fuel_missing
+                else (
+                    "Fixed quantiles (0.20, 0.40, 0.60, 0.80) of the study-area "
+                    "Impact Exposure Index distribution; frozen at build time."
+                )
             ),
             "quantiles": [0.20, 0.40, 0.60, 0.80],
-            "iei_weights": dict(severity.IEI_WEIGHTS),
+            "iei_weights": (
+                dict(severity.IEI_WEIGHTS_NO_FUEL)
+                if is_fuel_missing
+                else dict(severity.IEI_WEIGHTS)
+            ),
             "infra_subweights": dict(severity.INFRA_SUBWEIGHTS),
             "note": (
-                "Thresholds describe this study area only. They are not "
-                "validated damage probabilities."
+                "Thresholds describe this study area only. Computed without fuel component. "
+                "They are not validated damage probabilities."
+                if is_fuel_missing
+                else (
+                    "Thresholds describe this study area only. They are not "
+                    "validated damage probabilities."
+                )
             ),
         },
         "artifacts": {key: dict(value) for key, value in artifacts.items()},
@@ -1565,13 +1619,22 @@ def assemble_cell_exposure(
 
     out = out.merge(landcover, on="cell_id", how="left", validate="one_to_one")
     lc_columns = list(config.LC_AREA_COLUMNS.values())
-    missing_rows = out[lc_columns].isna().any(axis=1)
-    if missing_rows.any():
-        raise BuildError(
-            "WorldCover did not produce values for cell(s): "
-            f"{out.loc[missing_rows, 'cell_id'].head().tolist()}. "
-            "Missing land-cover data is never replaced with zero."
-        )
+    all_nan_lc = out[lc_columns].isna().all().all()
+    if not all_nan_lc:
+        missing_rows = out[lc_columns].isna().any(axis=1)
+        if missing_rows.any():
+            raise BuildError(
+                "WorldCover did not produce values for cell(s): "
+                f"{out.loc[missing_rows, 'cell_id'].head().tolist()}. "
+                "Missing land-cover data is never replaced with zero."
+            )
+
+    if "fuel_area_km2" not in out.columns:
+        if all_nan_lc:
+            out["fuel_area_km2"] = np.nan
+        else:
+            flammable_cols = [config.LC_AREA_COLUMNS[k] for k in config.FLAMMABLE_LC_KEYS]
+            out["fuel_area_km2"] = out[flammable_cols].sum(axis=1)
 
     population = population.copy()
     out = out.merge(population, on="cell_id", how="left", validate="one_to_one")
@@ -1627,14 +1690,15 @@ def build_cell_exposure(
     for radius in config.RING_DISTANCES_KM:
         column = f"pop_{radius}km"
         population = population.drop(columns=[column], errors="ignore")
-        subset = pop_rings[pop_rings["ring_km"] == float(radius)]
-        renamed = subset[
-            ["lat_cell", "lon_cell", "population"]
-        ].rename(columns={"population": column})
-        population = population.merge(
-            renamed, on=["lat_cell", "lon_cell"], how="left", validate="one_to_one"
-        )
-        if renamed.empty:
+        if not pop_rings.empty and "ring_km" in pop_rings.columns:
+            subset = pop_rings[pop_rings["ring_km"] == float(radius)]
+            renamed = subset[
+                ["lat_cell", "lon_cell", "population"]
+            ].rename(columns={"population": column})
+            population = population.merge(
+                renamed, on=["lat_cell", "lon_cell"], how="left", validate="one_to_one"
+            )
+        else:
             population[column] = np.nan
 
     infrastructure = roads.merge(buildings, on="cell_id", how="outer", validate="one_to_one")
@@ -1712,7 +1776,17 @@ def run_build(
     verified = verify_checksums(raw_dir, sources.all_files(), checksums)
 
     cells = cells_for_build(use_panel=use_panel)
-    landcover = read_worldcover_areas(sources.worldcover, cells, block_size=block_size)
+    if sources.worldcover:
+        landcover = read_worldcover_areas(sources.worldcover, cells, block_size=block_size)
+        flammable_cols = [config.LC_AREA_COLUMNS[k] for k in config.FLAMMABLE_LC_KEYS]
+        landcover["fuel_area_km2"] = landcover[flammable_cols].sum(axis=1)
+    else:
+        lc_dict = {"cell_id": cells["cell_id"].to_numpy()}
+        for col in config.LC_AREA_COLUMNS.values():
+            lc_dict[col] = np.nan
+        lc_dict["fuel_area_km2"] = np.nan
+        landcover = pd.DataFrame(lc_dict)
+
     pop_cell = read_worldpop_cell_totals(sources.worldpop, cells, block_size=block_size)
     pop_rings_long = read_worldpop_ring_totals(sources.worldpop, cells)
 
@@ -1806,24 +1880,50 @@ def run_build(
             required=config.ADMIN_UNITS_REQUIRED_COLUMNS,
         )
 
-    manifest_sources = [
-        source_record(
-            "worldcover", raw_dir, sources.worldcover, verified, _source_coverage()
-        ),
-        source_record("worldpop", raw_dir, [sources.worldpop], verified, _source_coverage()),
-        source_record(
-            "osm",
-            raw_dir,
-            [
-                sources.osm_roads,
-                sources.osm_buildings,
-                sources.osm_pois,
-                sources.osm_places,
-            ],
-            verified,
-            _source_coverage(),
-        ),
-    ]
+    manifest_sources = []
+    if sources.worldcover:
+        manifest_sources.append(
+            source_record(
+                "worldcover", raw_dir, sources.worldcover, verified, _source_coverage()
+            )
+        )
+    else:
+        manifest_sources.append(
+            {
+                "name": SOURCE_METADATA["worldcover"]["name"],
+                "version": SOURCE_METADATA["worldcover"]["version"],
+                "license": SOURCE_METADATA["worldcover"]["license"],
+                "attribution": SOURCE_METADATA["worldcover"]["attribution"],
+                "role": SOURCE_METADATA["worldcover"]["role"],
+                "status": "not ingested",
+                "reason": (
+                    "WorldCover tiles not downloaded; optional environmental "
+                    "dimension absent"
+                ),
+                "files": [],
+                "checksums": {},
+                "checksum": "",
+            }
+        )
+    manifest_sources.append(
+        source_record("worldpop", raw_dir, [sources.worldpop], verified, _source_coverage())
+    )
+    osm_rec = source_record(
+        "osm",
+        raw_dir,
+        [
+            sources.osm_roads,
+            sources.osm_buildings,
+            sources.osm_pois,
+            sources.osm_places,
+        ],
+        verified,
+        _source_coverage(),
+    )
+    if sources.osm_folder_name != OSM_FOLDER:
+        osm_rec["version"] = f"{sources.osm_folder_name} snapshot"
+    manifest_sources.append(osm_rec)
+
     if sources.ghsl:
         manifest_sources.append(
             source_record("ghsl", raw_dir, [sources.ghsl], verified, _source_coverage())
@@ -1838,6 +1938,11 @@ def run_build(
             source_record("ocha", raw_dir, admin_files, verified, _source_coverage())
         )
 
+    components_used = (
+        ["pop", "infra"]
+        if bool(indexed.get("iei_fuel_missing", pd.Series([False])).iloc[0])
+        else ["fuel", "pop", "infra"]
+    )
     manifest = build_manifest(
         manifest_sources,
         thresholds,
@@ -1851,6 +1956,7 @@ def run_build(
             "cell_area_total_km2": float(cells["cell_area_km2"].sum()),
             "cell_source": "fire_panel" if use_panel else "full_model_grid",
         },
+        components_used=components_used,
     )
     manifest_path = out_dir / config.MANIFEST_PATH.name
     manifest_path.write_text(

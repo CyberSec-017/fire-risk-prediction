@@ -170,6 +170,14 @@ def validate_landcover_fractions(
         return issues, {}
 
     numeric = _numeric(frame, required)
+    if numeric[lc_columns].isna().all().all():
+        return [
+            _warning(
+                "landcover_unavailable",
+                "Land-cover data is unavailable (WorldCover was not ingested).",
+            )
+        ], {"cells": int(len(frame)), "status": "not ingested"}
+
     bad = numeric.isna().any(axis=1) | np.isinf(numeric).any(axis=1)
     if bad.any():
         cell_ids = frame.loc[bad, "cell_id"].tolist() if "cell_id" in frame else []

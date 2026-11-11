@@ -219,6 +219,23 @@ def environmental_exposure(frame: pd.DataFrame) -> pd.DataFrame:
     """
     _require_columns(frame, config.ENV_REQUIRED_COLUMNS, "Environmental")
     out = frame.copy()
+
+    # When WorldCover was not ingested, all land-cover columns are entirely NaN.
+    lc_columns = list(config.LC_AREA_COLUMNS.values())
+    lc_numeric = out[lc_columns].apply(pd.to_numeric, errors="coerce")
+    if lc_numeric.isna().all().all():
+        area = _require_positive_area(out, "Environmental")
+        for column in lc_columns:
+            out[column] = np.nan
+        out["fuel_area_km2"] = np.nan
+        out["non_fuel_area_km2"] = np.nan
+        out["landcover_total_km2"] = np.nan
+        out["landcover_coverage_fraction"] = np.nan
+        out["fuel_fraction"] = np.nan
+        out["forest_fraction"] = np.nan
+        out["landcover_complete"] = False
+        return out
+
     numeric = _numeric_block(out, config.ENV_REQUIRED_COLUMNS, "Environmental")
     _require_non_negative(numeric, "Environmental")
     area = _require_positive_area(out, "Environmental")
@@ -373,6 +390,20 @@ def dimension_availability(frame: pd.DataFrame | None) -> dict[str, dict[str, ob
                     f"column(s) {list(missing)}."
                 ),
             }
+        elif dimension == "environmental":
+            lc_cols = list(config.LC_AREA_COLUMNS.values())
+            if frame[lc_cols].apply(pd.to_numeric, errors="coerce").isna().all().all():
+                report[dimension] = {
+                    "status": config.STATUS_UNAVAILABLE,
+                    "missing": (),
+                    "message": "Environmental exposure is unavailable (WorldCover was not ingested).",
+                }
+            else:
+                report[dimension] = {
+                    "status": config.STATUS_AVAILABLE,
+                    "missing": (),
+                    "message": "Environmental exposure columns are present.",
+                }
         else:
             report[dimension] = {
                 "status": config.STATUS_AVAILABLE,
@@ -385,8 +416,10 @@ def dimension_availability(frame: pd.DataFrame | None) -> dict[str, dict[str, ob
 def prepare_exposure(frame: pd.DataFrame | None) -> ExposureResult:
     """Validate and enrich an exposure table for severity scoring.
 
-    Returns ``status=UNAVAILABLE`` with a reason when any dimension is missing
-    or incomplete.  No partial table with zero-filled dimensions is returned.
+    Returns ``status=UNAVAILABLE`` with a reason when population or
+    infrastructure dimensions are missing or incomplete. When WorldCover is not
+    ingested, environmental exposure is marked unavailable while population and
+    infrastructure proceed with renormalized scoring.
     """
     dimensions = dimension_availability(frame)
     if frame is None or not isinstance(frame, pd.DataFrame) or frame.empty:
@@ -397,14 +430,15 @@ def prepare_exposure(frame: pd.DataFrame | None) -> ExposureResult:
             dimensions=dimensions,
         )
 
-    unavailable = [
+    # Population and infrastructure are strictly required. Environmental is optional.
+    strictly_required = [
         dimension
-        for dimension, info in dimensions.items()
-        if info["status"] != config.STATUS_AVAILABLE
+        for dimension in ("population", "infrastructure")
+        if dimensions[dimension]["status"] != config.STATUS_AVAILABLE
     ]
-    if unavailable:
+    if strictly_required:
         messages = " ".join(
-            str(dimensions[dimension]["message"]) for dimension in unavailable
+            str(dimensions[dimension]["message"]) for dimension in strictly_required
         )
         return ExposureResult(
             status=config.STATUS_UNAVAILABLE,
@@ -425,10 +459,16 @@ def prepare_exposure(frame: pd.DataFrame | None) -> ExposureResult:
             dimensions=dimensions,
         )
 
+    message = (
+        "Population and infrastructure exposure are available; environmental "
+        "exposure is unavailable (WorldCover not ingested)."
+        if dimensions.get("environmental", {}).get("status") != config.STATUS_AVAILABLE
+        else "Environmental, population and infrastructure exposure are available."
+    )
     return ExposureResult(
         status=config.STATUS_AVAILABLE,
         frame=out,
-        message="Environmental, population and infrastructure exposure are available.",
+        message=message,
         dimensions=dimensions,
     )
 

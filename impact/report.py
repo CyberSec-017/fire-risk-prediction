@@ -53,6 +53,8 @@ REPORT_COLUMNS = (
     "in_model_area",
     "burned",
     "iei",
+    "iei_components_used",
+    "iei_fuel_missing",
     "exposure_tier",
     "impact_priority",
     "impact_priority_label",
@@ -188,6 +190,7 @@ def _metadata(
     risk_start: Any,
     risk_end: Any,
     burned_area_status: str,
+    assessed: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
     generated_at = (
         datetime.now(timezone.utc)
@@ -195,6 +198,13 @@ def _metadata(
         .isoformat()
         .replace("+00:00", "Z")
     )
+    fuel_missing = False
+    if assessed is not None and isinstance(assessed, pd.DataFrame) and not assessed.empty:
+        if "iei_fuel_missing" in assessed.columns:
+            fuel_missing = bool(assessed["iei_fuel_missing"].iloc[0])
+        elif "fuel_area_km2" not in assessed.columns or pd.to_numeric(assessed["fuel_area_km2"], errors="coerce").isna().all():
+            fuel_missing = True
+
     return {
         "title": REPORT_TITLE,
         "generated_at": generated_at,
@@ -207,7 +217,14 @@ def _metadata(
         "manifest_generated_at": _text(manifest.get("generated_at")),
         "evidence_layers": evidence_layer_payload(),
         "sources": source_payload(),
-        "severity_method": formula_text(),
+        "severity_method": formula_text(fuel_missing=fuel_missing),
+        "fuel_missing": fuel_missing,
+        "severity_note": (
+            "Severity was computed without the fuel component (WorldCover not ingested; "
+            "weights renormalized to population 0.35/0.65 and infrastructure 0.30/0.65)."
+            if fuel_missing
+            else "Severity was computed with all three components (fuel, population and infrastructure)."
+        ),
         "priority_matrix": priority_matrix_rows(),
         "caveats": list(methodology.CAVEATS),
         "confirmed_burned_area": burned_area_status,
@@ -254,7 +271,7 @@ def _records(assessed: pd.DataFrame | None) -> list[dict[str, Any]]:
 
 
 def _metadata_rows(metadata: Mapping[str, Any]) -> list[tuple[str, str]]:
-    return [
+    rows = [
         ("Generated at (UTC)", _text(metadata.get("generated_at"))),
         ("Risk date", _text(metadata.get("risk_date")) or "Not available"),
         (
@@ -268,6 +285,14 @@ def _metadata_rows(metadata: Mapping[str, Any]) -> list[tuple[str, str]]:
         ("Manifest schema", _text(metadata.get("manifest_schema_version"))),
         ("Confirmed burned area", _text(metadata.get("confirmed_burned_area"))),
     ]
+    if metadata.get("fuel_missing"):
+        rows.append(
+            (
+                "Fuel component",
+                "Not available (severity computed without fuel component; weights renormalized: pop 0.35/0.65, infra 0.30/0.65)",
+            )
+        )
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -497,6 +522,7 @@ def build_reports(
         risk_start=risk_start,
         risk_end=risk_end,
         burned_area_status=burned_area_status,
+        assessed=assessed,
     )
     records = _records(assessed)
 

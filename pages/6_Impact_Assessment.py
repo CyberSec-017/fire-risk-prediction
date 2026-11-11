@@ -353,6 +353,24 @@ with tabs[0]:
             f"Potential exposure — mean Impact Exposure Index: {mean_iei:.4f}"
         )
 
+        fuel_missing_in_assessed = bool(
+            assessed.get("iei_fuel_missing", pd.Series([False])).iloc[0]
+            if "iei_fuel_missing" in assessed.columns
+            else ("fuel_area_km2" not in assessed.columns or pd.to_numeric(assessed["fuel_area_km2"], errors="coerce").isna().all())
+        )
+        if fuel_missing_in_assessed:
+            render_callout(
+                title="Severity computed without fuel component",
+                message=(
+                    "Severity was computed without the fuel component (WorldCover was not "
+                    "ingested; weights renormalized: population 0.35/0.65, infrastructure 0.30/0.65)."
+                ),
+                variant="info",
+            )
+            st.markdown(
+                "Severity was computed without the fuel component (pop+infra only; weights renormalized)."
+            )
+
         st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
         _render_folium(
             exposure_choropleth(
@@ -375,10 +393,30 @@ with tabs[0]:
 
 # ── Environment ───────────────────────────────────────────────────────────
 with tabs[1]:
+    env_unavailable = (
+        assessed is not None
+        and (
+            "fuel_area_km2" not in assessed.columns
+            or pd.to_numeric(assessed["fuel_area_km2"], errors="coerce").isna().all()
+        )
+    )
     if not data_ready or assessed is None:
         _unavailable(
             "Environmental exposure is unavailable because the land-cover "
             "artifact or manifest is missing."
+        )
+    elif env_unavailable:
+        render_callout(
+            title="Environmental Exposure Not Available",
+            message=(
+                "Not available: WorldCover not ingested. Land-cover and "
+                "environmental exposure data was not downloaded. Severity was "
+                "computed without the fuel component."
+            ),
+            variant="info",
+        )
+        st.markdown(
+            "**Environmental exposure** — Not available (WorldCover not ingested)."
         )
     else:
         render_section_header(
@@ -621,6 +659,17 @@ with tabs[5]:
             "Manifest checksum (SHA-256): "
             f"`{report.manifest_checksum}`"
         )
+        if assessed is not None and not assessed.empty:
+            fuel_missing_in_report = bool(
+                assessed.get("iei_fuel_missing", pd.Series([False])).iloc[0]
+                if "iei_fuel_missing" in assessed.columns
+                else ("fuel_area_km2" not in assessed.columns or pd.to_numeric(assessed["fuel_area_km2"], errors="coerce").isna().all())
+            )
+            if fuel_missing_in_report:
+                st.info(
+                    "Severity was computed without the fuel component (WorldCover was not ingested; "
+                    "weights renormalized to population 0.35/0.65 and infrastructure 0.30/0.65)."
+                )
         d1, d2, d3 = st.columns(3)
         with d1:
             st.download_button(

@@ -37,6 +37,13 @@ from impact.exposure import ImpactDataError
 IEI_WEIGHTS = {"fuel": 0.35, "population": 0.35, "infrastructure": 0.30}
 INFRA_SUBWEIGHTS = {"road": 0.45, "building": 0.35, "critical": 0.20}
 
+# Renormalized weights when fuel component is absent (0.35/0.65 and 0.30/0.65)
+IEI_RENORMALIZED_DIVISOR = IEI_WEIGHTS["population"] + IEI_WEIGHTS["infrastructure"]
+IEI_WEIGHTS_NO_FUEL = {
+    "population": IEI_WEIGHTS["population"] / IEI_RENORMALIZED_DIVISOR,
+    "infrastructure": IEI_WEIGHTS["infrastructure"] / IEI_RENORMALIZED_DIVISOR,
+}
+
 TIER_LABELS = ("Very Low", "Low", "Moderate", "High", "Very High")
 
 # Provisional defaults.  The build stage freezes the final values in
@@ -89,6 +96,14 @@ PRIORITY_LABELS = {
 IEI_REQUIRED_COLUMNS = (
     config.CELL_AREA_COLUMN,
     "fuel_area_km2",
+    "pop_cell",
+    "road_km_total",
+    "building_footprint_km2",
+    "critical_count_total",
+)
+
+IEI_NON_FUEL_COLUMNS = (
+    config.CELL_AREA_COLUMN,
     "pop_cell",
     "road_km_total",
     "building_footprint_km2",
@@ -192,23 +207,26 @@ def tier_for_iei(
 # ---------------------------------------------------------------------------
 # Index computation
 # ---------------------------------------------------------------------------
-def _numeric_required(frame: pd.DataFrame) -> pd.DataFrame:
-    missing = [column for column in IEI_REQUIRED_COLUMNS if column not in frame.columns]
+def _numeric_required(
+    frame: pd.DataFrame,
+    required: Sequence[str] = IEI_REQUIRED_COLUMNS,
+) -> pd.DataFrame:
+    missing = [column for column in required if column not in frame.columns]
     if missing:
         raise SeverityInputError(
             "Impact severity is unavailable: missing required column(s) "
             f"{missing}. Run impact.exposure.prepare_exposure first; missing "
             "data is never treated as zero."
         )
-    numeric = frame[list(IEI_REQUIRED_COLUMNS)].apply(pd.to_numeric, errors="coerce")
+    numeric = frame[list(required)].apply(pd.to_numeric, errors="coerce")
     bad = numeric.isna() | np.isinf(numeric)
     if bad.to_numpy().any():
-        offending = [column for column in IEI_REQUIRED_COLUMNS if bad[column].any()]
+        offending = [column for column in required if bad[column].any()]
         raise SeverityInputError(
             "Impact severity is unavailable: missing, non-numeric or "
             f"non-finite values in {offending}."
         )
-    negative = [column for column in IEI_REQUIRED_COLUMNS if (numeric[column] < 0).any()]
+    negative = [column for column in required if (numeric[column] < 0).any()]
     if negative:
         raise SeverityInputError(
             f"Impact severity is unavailable: negative values in {negative}."
@@ -241,61 +259,135 @@ def compute_index(
 ) -> pd.DataFrame:
     """Add normalized components, IEI and exposure tier to a prepared frame.
 
-    Requires the raw columns produced by
-    :func:`impact.exposure.prepare_exposure`.  Raises
-    :class:`SeverityInputError` rather than substituting zeros.
+    When the fuel component (``fuel_area_km2``) is entirely absent across all
+    cells (or all values are NaN), IEI is computed from the remaining population
+    and infrastructure components with their weights renormalized (0.35/0.65 and
+    0.30/0.65). If some cells have fuel and others do not, an error is raised
+    because methods cannot be mixed and missing fuel is never treated as zero.
     """
     if frame is None or not isinstance(frame, pd.DataFrame) or frame.empty:
         raise SeverityInputError(
             "Impact severity is unavailable: no exposure rows were supplied."
         )
 
-    weights = dict(weights or IEI_WEIGHTS)
     infra_weights = dict(infra_weights or INFRA_SUBWEIGHTS)
-    _validate_weights(weights, ("fuel", "population", "infrastructure"))
     _validate_weights(infra_weights, ("road", "building", "critical"))
     resolved = resolve_thresholds(thresholds, manifest)
 
-    numeric = _numeric_required(frame)
-    area = numeric[config.CELL_AREA_COLUMN]
-
-    if (numeric["fuel_area_km2"] > area * 1.05).any():
-        raise SeverityInputError(
-            "Impact severity is unavailable: flammable area exceeds cell area "
-            "by more than 5 %."
-        )
-
-    pop_p95 = _p95(numeric["pop_cell"], "population")
-    road_p95 = _p95(numeric["road_km_total"], "road length")
-    building_p95 = _p95(numeric["building_footprint_km2"], "building footprint")
-    critical_p95 = _p95(numeric["critical_count_total"], "critical facilities")
-
-    out = frame.copy()
-    for column in IEI_REQUIRED_COLUMNS:
-        out[column] = numeric[column]
-
-    out["fuel_norm"] = (numeric["fuel_area_km2"] / area).clip(0.0, 1.0)
-    out["pop_norm"] = (
-        np.log1p(numeric["pop_cell"]) / np.log1p(pop_p95)
-    ).clip(0.0, 1.0)
-    out["road_norm"] = (numeric["road_km_total"] / road_p95).clip(0.0, 1.0)
-    out["building_norm"] = (
-        numeric["building_footprint_km2"] / building_p95
-    ).clip(0.0, 1.0)
-    out["critical_norm"] = (
-        numeric["critical_count_total"] / critical_p95
-    ).clip(0.0, 1.0)
-
-    out["infra_norm"] = (
-        infra_weights["road"] * out["road_norm"]
-        + infra_weights["building"] * out["building_norm"]
-        + infra_weights["critical"] * out["critical_norm"]
+    # Check fuel availability
+    fuel_in_cols = "fuel_area_km2" in frame.columns
+    fuel_series = (
+        pd.to_numeric(frame["fuel_area_km2"], errors="coerce")
+        if fuel_in_cols
+        else None
     )
-    out["iei"] = (
-        weights["fuel"] * out["fuel_norm"]
-        + weights["population"] * out["pop_norm"]
-        + weights["infrastructure"] * out["infra_norm"]
-    ).clip(0.0, 1.0)
+
+    if not fuel_in_cols or fuel_series is None or fuel_series.isna().all():
+        fuel_missing = True
+    elif fuel_series.isna().any():
+        offending = [
+            str(frame.loc[idx, config.CELL_ID_COLUMN])
+            if config.CELL_ID_COLUMN in frame.columns
+            else str(idx)
+            for idx in fuel_series.index[fuel_series.isna()]
+        ]
+        raise SeverityInputError(
+            "Impact severity is unavailable: fuel_area_km2 is missing in some cells "
+            f"({offending[:5]}) but present in others. Missing data is never treated "
+            "as zero and scoring methods cannot be mixed across cells."
+        )
+    else:
+        fuel_missing = False
+
+    if fuel_missing:
+        if weights is not None:
+            used_weights = dict(weights)
+            _validate_weights(used_weights, ("population", "infrastructure"))
+        else:
+            used_weights = dict(IEI_WEIGHTS_NO_FUEL)
+
+        numeric = _numeric_required(frame, required=IEI_NON_FUEL_COLUMNS)
+        pop_p95 = _p95(numeric["pop_cell"], "population")
+        road_p95 = _p95(numeric["road_km_total"], "road length")
+        building_p95 = _p95(numeric["building_footprint_km2"], "building footprint")
+        critical_p95 = _p95(numeric["critical_count_total"], "critical facilities")
+
+        out = frame.copy()
+        for column in IEI_NON_FUEL_COLUMNS:
+            out[column] = numeric[column]
+
+        out["fuel_norm"] = np.nan
+        out["pop_norm"] = (
+            np.log1p(numeric["pop_cell"]) / np.log1p(pop_p95)
+        ).clip(0.0, 1.0)
+        out["road_norm"] = (numeric["road_km_total"] / road_p95).clip(0.0, 1.0)
+        out["building_norm"] = (
+            numeric["building_footprint_km2"] / building_p95
+        ).clip(0.0, 1.0)
+        out["critical_norm"] = (
+            numeric["critical_count_total"] / critical_p95
+        ).clip(0.0, 1.0)
+
+        out["infra_norm"] = (
+            infra_weights["road"] * out["road_norm"]
+            + infra_weights["building"] * out["building_norm"]
+            + infra_weights["critical"] * out["critical_norm"]
+        )
+        out["iei"] = (
+            used_weights["population"] * out["pop_norm"]
+            + used_weights["infrastructure"] * out["infra_norm"]
+        ).clip(0.0, 1.0)
+        out["iei_components_used"] = "pop+infra"
+        out["iei_fuel_missing"] = True
+        if "fuel_area_km2" not in out.columns:
+            out["fuel_area_km2"] = np.nan
+    else:
+        used_weights = dict(weights or IEI_WEIGHTS)
+        _validate_weights(used_weights, ("fuel", "population", "infrastructure"))
+
+        numeric = _numeric_required(frame, required=IEI_REQUIRED_COLUMNS)
+        area = numeric[config.CELL_AREA_COLUMN]
+
+        if (numeric["fuel_area_km2"] > area * 1.05).any():
+            raise SeverityInputError(
+                "Impact severity is unavailable: flammable area exceeds cell area "
+                "by more than 5 %."
+            )
+
+        pop_p95 = _p95(numeric["pop_cell"], "population")
+        road_p95 = _p95(numeric["road_km_total"], "road length")
+        building_p95 = _p95(numeric["building_footprint_km2"], "building footprint")
+        critical_p95 = _p95(numeric["critical_count_total"], "critical facilities")
+
+        out = frame.copy()
+        for column in IEI_REQUIRED_COLUMNS:
+            out[column] = numeric[column]
+
+        out["fuel_norm"] = (numeric["fuel_area_km2"] / area).clip(0.0, 1.0)
+        out["pop_norm"] = (
+            np.log1p(numeric["pop_cell"]) / np.log1p(pop_p95)
+        ).clip(0.0, 1.0)
+        out["road_norm"] = (numeric["road_km_total"] / road_p95).clip(0.0, 1.0)
+        out["building_norm"] = (
+            numeric["building_footprint_km2"] / building_p95
+        ).clip(0.0, 1.0)
+        out["critical_norm"] = (
+            numeric["critical_count_total"] / critical_p95
+        ).clip(0.0, 1.0)
+
+        out["infra_norm"] = (
+            infra_weights["road"] * out["road_norm"]
+            + infra_weights["building"] * out["building_norm"]
+            + infra_weights["critical"] * out["critical_norm"]
+        )
+        out["iei"] = (
+            used_weights["fuel"] * out["fuel_norm"]
+            + used_weights["population"] * out["pop_norm"]
+            + used_weights["infrastructure"] * out["infra_norm"]
+        ).clip(0.0, 1.0)
+        out["iei_components_used"] = "fuel+pop+infra"
+        out["iei_fuel_missing"] = False
+
     out["exposure_tier"] = classify_iei(out["iei"], resolved)
     return out
 
@@ -381,6 +473,14 @@ def assess_impact(
             )
             enriched["impact_priority_label"] = NOT_APPLICABLE
     except SeverityInputError as exc:
+        fuel_missing_in_frame = (
+            frame is None
+            or "fuel_area_km2" not in frame.columns
+            or pd.to_numeric(frame.get("fuel_area_km2"), errors="coerce").isna().all()
+        )
+        required_cols = (
+            IEI_NON_FUEL_COLUMNS if fuel_missing_in_frame else IEI_REQUIRED_COLUMNS
+        )
         return SeverityResult(
             status=config.STATUS_UNAVAILABLE,
             frame=None,
@@ -388,18 +488,31 @@ def assess_impact(
             thresholds=tuple(thresholds or DEFAULT_TIER_THRESHOLDS),
             missing_components=tuple(
                 column
-                for column in IEI_REQUIRED_COLUMNS
+                for column in required_cols
                 if frame is None or column not in frame.columns
             ),
         )
 
+    fuel_missing = bool(
+        enriched["iei_fuel_missing"].iloc[0]
+        if "iei_fuel_missing" in enriched.columns and not enriched.empty
+        else False
+    )
+    message = (
+        "Impact Exposure Index and priority computed without fuel component "
+        "(pop+infra only; weights renormalized: pop 0.35/0.65, infra 0.30/0.65). "
+        "Priority is a heuristic, not a damage probability."
+        if fuel_missing
+        else (
+            "Impact Exposure Index and priority computed. Priority is a "
+            "heuristic, not a damage probability."
+        )
+    )
+
     return SeverityResult(
         status=config.STATUS_AVAILABLE,
         frame=enriched,
-        message=(
-            "Impact Exposure Index and priority computed. Priority is a "
-            "heuristic, not a damage probability."
-        ),
+        message=message,
         thresholds=tuple(resolved),
     )
 
@@ -407,8 +520,17 @@ def assess_impact(
 # ---------------------------------------------------------------------------
 # Documentation helpers
 # ---------------------------------------------------------------------------
-def formula_text() -> str:
+def formula_text(fuel_missing: bool = False) -> str:
     """Human-readable IEI formula for reports and UI."""
+    if fuel_missing:
+        return (
+            "IEI = (0.35/0.65) × pop_norm + (0.30/0.65) × infra_norm; "
+            "infra_norm = 0.45 × road_norm + 0.35 × building_norm + "
+            "0.20 × critical_norm. Computed without fuel component (WorldCover "
+            "not ingested; weights renormalized to population and infrastructure). "
+            "pop_norm and infrastructure sub-components are divided by their "
+            "study-area 95th percentile."
+        )
     return (
         "IEI = 0.35 × fuel_norm + 0.35 × pop_norm + 0.30 × infra_norm; "
         "infra_norm = 0.45 × road_norm + 0.35 × building_norm + "
@@ -444,6 +566,8 @@ __all__ = [
     "PRIORITY_MATRIX",
     "PRIORITY_LABELS",
     "IEI_REQUIRED_COLUMNS",
+    "IEI_NON_FUEL_COLUMNS",
+    "IEI_WEIGHTS_NO_FUEL",
     "IEI_COMPONENT_COLUMNS",
     "NOT_APPLICABLE",
     "TIER_UNAVAILABLE",

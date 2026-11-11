@@ -208,9 +208,10 @@ def test_assign_priority_requires_tier_column():
 
 
 def test_compute_index_requires_prepared_columns():
+    frame = prepared_frame().drop(columns=["pop_cell"])
     with pytest.raises(severity.SeverityInputError) as excinfo:
-        severity.compute_index(raw_frame())
-    assert "fuel_area_km2" in str(excinfo.value)
+        severity.compute_index(frame)
+    assert "pop_cell" in str(excinfo.value)
     assert "never treated as zero" in str(excinfo.value)
 
 
@@ -236,16 +237,46 @@ def test_assess_impact_returns_available_result():
     result = severity.assess_impact(frame)
     assert result.available
     assert result.frame is not None
-    assert {"iei", "exposure_tier", "impact_priority"} <= set(result.frame.columns)
+    assert {"iei", "exposure_tier", "impact_priority", "iei_components_used", "iei_fuel_missing"} <= set(result.frame.columns)
     assert result.frame["impact_priority"].notna().all()
+    assert (result.frame["iei_components_used"] == "fuel+pop+infra").all()
+    assert (result.frame["iei_fuel_missing"] == False).all()
 
 
-def test_assess_impact_returns_explicit_unavailable_state():
+def test_assess_impact_without_fuel_renormalizes_weights():
+    # Fuel component entirely absent -> compute with pop+infra renormalized
     frame = prepared_frame().drop(columns=["fuel_area_km2"])
+    result = severity.assess_impact(frame)
+    assert result.status == config.STATUS_AVAILABLE
+    assert result.frame is not None
+    assert result.frame["fuel_norm"].isna().all()
+    assert (result.frame["iei_fuel_missing"] == True).all()
+    assert (result.frame["iei_components_used"] == "pop+infra").all()
+
+    # Verify formula on first row: (0.35/0.65)*pop_norm + (0.30/0.65)*infra_norm
+    row = result.frame.iloc[0]
+    expected_iei = (0.35 / 0.65) * row["pop_norm"] + (0.30 / 0.65) * row["infra_norm"]
+    assert row["iei"] == pytest.approx(expected_iei)
+    assert row["exposure_tier"] in severity.TIER_LABELS
+    assert "without fuel component" in result.message
+
+
+def test_assess_impact_rejects_mixed_partial_fuel_coverage():
+    frame = prepared_frame()
+    # Fuel present in some cells but NaN in others -> must fail loudly
+    frame.loc[0, "fuel_area_km2"] = np.nan
     result = severity.assess_impact(frame)
     assert result.status == config.STATUS_UNAVAILABLE
     assert result.frame is None
-    assert "fuel_area_km2" in result.message
+    assert "missing in some cells" in result.message
+
+
+def test_assess_impact_returns_explicit_unavailable_state():
+    frame = prepared_frame().drop(columns=["road_km_total"])
+    result = severity.assess_impact(frame)
+    assert result.status == config.STATUS_UNAVAILABLE
+    assert result.frame is None
+    assert "road_km_total" in result.message
 
 
 def test_assess_impact_without_risk_column_keeps_priority_not_applicable():
