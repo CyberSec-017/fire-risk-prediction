@@ -54,7 +54,12 @@ MODEL_FEATURES = (
     "doy_cos",
 )
 
-FORBIDDEN_IMPACT_IMPORTS = ("app_core", "dashboard", "streamlit")
+FORBIDDEN_IMPACT_IMPORTS = ("app_core", "streamlit")
+
+# Stage 3 presentation modules must reuse the existing dashboard Folium and
+# Plotly helpers by importing them (the brief forbids copying or changing
+# those helpers).  They still may not import app_core or Streamlit.
+DASHBOARD_IMPORT_ALLOWED = {"maps.py", "charts.py"}
 
 
 def sha256(path: Path) -> str:
@@ -99,11 +104,18 @@ def test_model_card_contract_unchanged():
 def test_impact_modules_do_not_import_model_or_ui_code():
     for path in sorted(IMPACT_DIR.glob("*.py")):
         modules = imported_modules(path)
+        allow_dashboard = path.name in DASHBOARD_IMPORT_ALLOWED
         for module in modules:
             root = module.split(".")[0]
+            if root == "dashboard" and allow_dashboard:
+                continue
             assert root not in FORBIDDEN_IMPACT_IMPORTS, (
                 f"{path.name} imports {module!r}; the impact module must stay "
-                "independent of app_core, dashboard and Streamlit."
+                "independent of app_core and Streamlit."
+            )
+            assert root != "dashboard", (
+                f"{path.name} imports {module!r}; only the Stage 3 presentation "
+                "modules may reuse dashboard helpers."
             )
 
 

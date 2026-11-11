@@ -1,0 +1,55 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-01-01T00:00:00Z",
+  "generator": "tests/fixtures/impact",
+  "study_area": {
+    "cell_count": 4
+  },
+  "grid": {
+    "lat_min": 32.0,
+    "lat_max": 37.5,
+    "lon_min": -2.0,
+    "lon_max": 9.0,
+    "lat_step": 0.5,
+    "lon_step": 0.625
+  },
+  "sources": [
+    {
+      "name": "Synthetic land-cover fixture",
+      "version": "test",
+      "license": "CC BY 4.0",
+      "attribution": "Synthetic fixture for tests only",
+      "role": "Land-cover composition",
+      "status": "test",
+      "checksum": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "name": "Synthetic population fixture",
+      "version": "test",
+      "license": "CC BY 4.0",
+      "attribution": "Synthetic fixture for tests only",
+      "role": "Population exposure",
+      "status": "test",
+      "checksum": "1111111111111111111111111111111111111111111111111111111111111111"
+    }
+  ],
+  "severity": {
+    "tier_labels": [
+      "Very Low",
+      "Low",
+      "Moderate",
+      "High",
+      "Very High"
+    ],
+    "tier_thresholds": [
+      0.1,
+      0.2,
+      0.35,
+      0.55
+    ]
+  },
+  "artifacts": {},
+  "phase_2": {
+    "burned_area": "Not built in this synthetic fixture (phase 2)."
+  }
+}

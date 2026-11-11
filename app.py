@@ -251,6 +251,33 @@ with col_m2:
         unsafe_allow_html=True,
     )
 
+st.markdown(
+    f"""
+    <div style="
+        background-color: {COLORS['surface_white']};
+        border: 1px solid {COLORS['border_light']};
+        border-radius: 8px;
+        padding: 20px 22px;
+        margin-bottom: 16px;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    ">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">
+            <div style="font-size: 0.95rem; font-weight: 600; color: {COLORS['text_primary']};">
+                5. Wildfire Impact Assessment
+            </div>
+            <span style="font-size: 0.72rem; background-color: {COLORS['surface_subtle']}; padding: 2px 8px; border-radius: 4px; color: {COLORS['text_muted']};">Module 5</span>
+        </div>
+        <p style="font-size: 0.84rem; color: {COLORS['text_secondary']}; line-height: 1.5; margin: 0 0 14px 0;">
+            Separates predicted fire risk, potential exposure, observed detections and confirmed burned area. Includes environment, population and infrastructure views, a risk × exposure priority matrix, and downloadable evidence reports.
+        </p>
+        <a href="/Impact_Assessment" target="_self" style="font-size: 0.82rem; font-weight: 600; color: {COLORS['brand_primary']}; text-decoration: none;">
+            Open Impact Assessment →
+        </a>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
 # Study Area Parameters Table
 with st.expander("Geographic and Sensor Specifications", expanded=False):
     spec_data = {
