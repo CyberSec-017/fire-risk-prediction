@@ -55,6 +55,10 @@ def test_page_loads_when_impact_data_is_absent():
     assert "Not available" in body
     assert "Dataset Not Found" in body
     assert "Impact exposure layers" in body
+    # The missing-data card must reference the impact builder, not the
+    # fire-panel preprocessing script.
+    assert "python scripts/build_impact_layers.py" in body
+    assert "python src/build_panel.py" not in body
     # No fabricated KPI widgets when the impact artifacts are missing.
     assert len(app.metric) == 0
     # The page still names the four evidence layers it would report.

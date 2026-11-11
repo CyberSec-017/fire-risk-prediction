@@ -33,7 +33,6 @@ st.set_page_config(
 from dashboard.components import (  # noqa: E402
     inject_global_css,
     render_callout,
-    render_data_unavailable,
     render_header,
     render_kpi_card,
     render_section_header,
@@ -115,8 +114,18 @@ def _render_folium(m: object, height: int = 520) -> None:
 
 
 def _unavailable(message: str, dataset: str = "Impact exposure layers") -> None:
-    render_data_unavailable(dataset)
-    st.markdown(f"**Not available.** {message}")
+    # The shared render_data_unavailable card hard-codes the fire-panel build
+    # command, which is wrong for this module.  Use a callout with the impact
+    # artifact command instead of changing the shared component.
+    render_callout(
+        title=f"Dataset Not Found: {dataset}",
+        message=(
+            f"Not available. {message} "
+            "Generate the impact artifacts with "
+            "<code>python scripts/build_impact_layers.py</code>."
+        ),
+        variant="warning",
+    )
 
 
 # ---------------------------------------------------------------------------
