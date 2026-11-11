@@ -55,6 +55,47 @@ fire_rate = (fire_cell_days / total_records) * 100
 total_days = (max_d - min_d).days + 1
 weather_param_count = sum(1 for c in WEATHER_VARIABLES if c in df.columns)
 
+# Executive Operational Status Banner
+st.markdown(
+    f"""
+    <div style="
+        background-color: {COLORS['surface_white']};
+        border: 1px solid {COLORS['border_light']};
+        border-radius: 6px;
+        padding: 12px 18px;
+        margin-bottom: 20px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 12px;
+    ">
+        <div style="font-size: 0.84rem; color: {COLORS['text_secondary']};">
+            <span style="font-weight: 600; color: {COLORS['text_primary']};">Active Surveillance Domain:</span> 
+            Northern Algeria ({unique_cells} cells, 32.0°N–37.5°N) &nbsp;•&nbsp; 
+            <span style="font-weight: 600; color: {COLORS['text_primary']};">Detection Feed:</span> NASA FIRMS VIIRS &nbsp;•&nbsp; 
+            <span style="font-weight: 600; color: {COLORS['text_primary']};">Atmospheric Forcing:</span> NASA POWER
+        </div>
+        <div style="
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.74rem;
+            font-weight: 600;
+            color: #0F5132;
+            background-color: #E8F5E9;
+            border: 1px solid #A3D9A5;
+            padding: 3px 10px;
+            border-radius: 9999px;
+        ">
+            <span style="width: 6px; height: 6px; border-radius: 50%; background-color: #10B981;"></span>
+            <span>Pipeline Synchronized • H=3 Horizon</span>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
 # Top KPI Row
 col1, col2, col3, col4 = st.columns(4)
 
@@ -126,7 +167,7 @@ with col_s1:
 with col_s2:
     render_section_header(
         title="Year-over-Year Dynamics",
-        subtitle="Comparison of fire intensity between 2024, 2025, and 2026",
+        subtitle=f"Annual fire cell-day distribution across the observation timeline ({min_d.year}–{max_d.year})",
     )
     fig_yearly = yearly_fire_breakdown(df)
     st.plotly_chart(fig_yearly, use_container_width=True, key="overview_yearly")
