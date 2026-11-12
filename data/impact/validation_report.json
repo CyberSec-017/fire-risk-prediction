@@ -1,0 +1,65 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-11-12T11:52:47Z",
+  "impact_dir": "C:\\Users\\wassim\\OneDrive\\Desktop\\fire-app\\data\\impact",
+  "ok": true,
+  "counts": {
+    "error": 0,
+    "warning": 3,
+    "info": 0
+  },
+  "issues": [
+    {
+      "code": "landcover_unavailable",
+      "level": "warning",
+      "message": "Land-cover data is unavailable (WorldCover was not ingested).",
+      "cell_id": null
+    },
+    {
+      "code": "ghsl_unavailable",
+      "level": "warning",
+      "message": "GHSL built-surface column is absent, so the OSM-vs-GHSL completeness diagnostic cannot run.",
+      "cell_id": null
+    },
+    {
+      "code": "admin_units_unavailable",
+      "level": "warning",
+      "message": "Administrative-unit assignment is unavailable (optional OCHA input not built).",
+      "cell_id": null
+    }
+  ],
+  "summaries": {
+    "cell_areas": {
+      "cells": 175,
+      "total_area_km2": 558905.8118170572,
+      "expected_total_area_km2": 558905.8118170572,
+      "max_abs_error_km2": 0.0,
+      "tolerance_km2": 1.0
+    },
+    "landcover": {
+      "cells": 175,
+      "status": "not ingested"
+    },
+    "population": {
+      "cells": 175,
+      "total_population": 32393488.762745336,
+      "max_density_per_km2": 629.8224731855578,
+      "non_monotonic_cells": 0,
+      "implausible_density_cells": 0
+    },
+    "osm_vs_ghsl": {
+      "available": false
+    },
+    "cross_file": {
+      "rows": 525,
+      "cells": 175,
+      "distances_km": [
+        5.0,
+        10.0,
+        25.0
+      ],
+      "note": "Distance rings overlap and must not be summed across cells."
+    }
+  },
+  "diagnostics": []
+}

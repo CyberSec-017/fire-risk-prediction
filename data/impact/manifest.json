@@ -1,0 +1,267 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-11-12T11:52:44Z",
+  "generator": "scripts/build_impact_layers.py",
+  "study_area": {
+    "lat_min": 32.0,
+    "lat_max": 37.5,
+    "lon_min": -1.875,
+    "lon_max": 8.75,
+    "cell_count": 175,
+    "total_cell_count": 209,
+    "excluded_cell_count": 34,
+    "cell_area_total_km2": 558905.8118170572,
+    "excluded_cell_area_total_km2": 104549.98150534811,
+    "cell_source": "fire_panel"
+  },
+  "excluded_cells": {
+    "count": 34,
+    "cells": [
+      "lat37.000_lon-1.875",
+      "lat37.000_lon-1.250",
+      "lat37.000_lon-0.625",
+      "lat37.000_lon0.000",
+      "lat37.000_lon0.625",
+      "lat37.000_lon1.250",
+      "lat37.000_lon1.875",
+      "lat37.000_lon2.500",
+      "lat37.000_lon3.125",
+      "lat37.000_lon3.750",
+      "lat37.000_lon4.375",
+      "lat37.000_lon5.000",
+      "lat37.000_lon5.625",
+      "lat37.000_lon6.250",
+      "lat37.000_lon8.125",
+      "lat37.000_lon8.750",
+      "lat37.500_lon-1.875",
+      "lat37.500_lon-1.250",
+      "lat37.500_lon-0.625",
+      "lat37.500_lon0.000",
+      "lat37.500_lon0.625",
+      "lat37.500_lon1.250",
+      "lat37.500_lon1.875",
+      "lat37.500_lon2.500",
+      "lat37.500_lon3.125",
+      "lat37.500_lon3.750",
+      "lat37.500_lon4.375",
+      "lat37.500_lon5.000",
+      "lat37.500_lon5.625",
+      "lat37.500_lon6.250",
+      "lat37.500_lon6.875",
+      "lat37.500_lon7.500",
+      "lat37.500_lon8.125",
+      "lat37.500_lon8.750"
+    ],
+    "reason": "outside or only partly covered by the WorldPop raster",
+    "raster_bounds": [
+      -8.67374995,
+      18.960416792,
+      11.988749966999999,
+      37.095416719
+    ],
+    "nodata_rule": "A cell fully inside the WorldPop raster with no valid pixel is treated as zero population (constrained product: NoData means no modelled settlement). Cells outside or only partly covered by the raster are excluded from the exposure table, never zero-filled."
+  },
+  "grid": {
+    "lat_min": 32.0,
+    "lat_max": 37.5,
+    "lon_min": -2.0,
+    "lon_max": 9.0,
+    "lat_step": 0.5,
+    "lon_step": 0.625
+  },
+  "sources": [
+    {
+      "name": "ESA WorldCover 2021 v200",
+      "version": "2021 v200",
+      "license": "CC BY 4.0",
+      "attribution": "\u00a9 ESA WorldCover project 2021 / Contains modified Copernicus Sentinel data (2021) processed by ESA WorldCover consortium",
+      "role": "Land-cover composition and flammable fuel area",
+      "status": "not ingested",
+      "reason": "WorldCover tiles not downloaded; optional environmental dimension absent",
+      "files": [],
+      "checksums": {},
+      "checksum": ""
+    },
+    {
+      "name": "WorldPop 2020 constrained UN adjusted (Algeria)",
+      "version": "2020 / BSGM / UNadj constrained / 100 m",
+      "license": "CC BY 4.0",
+      "attribution": "WorldPop (www.worldpop.org), licensed under CC BY 4.0",
+      "role": "Gridded population, ring population and settlement population",
+      "coverage": {
+        "lat_min": 32.0,
+        "lat_max": 37.5,
+        "lon_min": -1.875,
+        "lon_max": 8.75,
+        "description": "Model-cell-centre extent, clipped to the study area"
+      },
+      "files": [
+        "dza_ppp_2020_UNadj_constrained.tif"
+      ],
+      "checksums": {
+        "dza_ppp_2020_UNadj_constrained.tif": "ed9a7891ba36dcb58ab45d64d4346d9ef7edb925cda9b02c9b230ae0060538b9"
+      },
+      "checksum": "fbb057353d2e423ac54bc45e253bf4769933115a2398402fae33cfec8b0bf599"
+    },
+    {
+      "name": "OpenStreetMap \u2014 Geofabrik Algeria extract",
+      "version": "algeria-261110-free.shp snapshot",
+      "license": "ODbL 1.0",
+      "attribution": "\u00a9 OpenStreetMap contributors, available under the Open Database License (ODbL 1.0)",
+      "role": "Mapped roads, buildings, places and critical facilities",
+      "coverage": {
+        "lat_min": 32.0,
+        "lat_max": 37.5,
+        "lon_min": -1.875,
+        "lon_max": 8.75,
+        "description": "Model-cell-centre extent, clipped to the study area"
+      },
+      "files": [
+        "algeria-261110-free.shp/gis_osm_buildings_a_free_1.shp",
+        "algeria-261110-free.shp/gis_osm_places_free_1.shp",
+        "algeria-261110-free.shp/gis_osm_pois_free_1.shp",
+        "algeria-261110-free.shp/gis_osm_roads_free_1.shp"
+      ],
+      "checksums": {
+        "gis_osm_buildings_a_free_1.shp": "eeae42d406174f3e0d23aebef074ed72efbc1ce7d8774d39878032681c7aa44a",
+        "gis_osm_places_free_1.shp": "3cd3ab94545b63fc4703ce97ef90b2383f48c272785fea8e7d0b4c99b89a103a",
+        "gis_osm_pois_free_1.shp": "c6ef8948d007a8a5e163458b988723ea61c89f0c8b91139ee3816b86df79d2ec",
+        "gis_osm_roads_free_1.shp": "05597b4a494e2e9830c8d5dfc9b22a00e8e5c4708444697600788c834b120854"
+      },
+      "checksum": "f9884f850a903a2f0618a3b28ac5b74e533cddea26b2919e8c4662226c3a1c6f"
+    }
+  ],
+  "severity": {
+    "tier_labels": [
+      "Very Low",
+      "Low",
+      "Moderate",
+      "High",
+      "Very High"
+    ],
+    "tier_thresholds": [
+      0.11862587,
+      0.40406799,
+      0.49328229,
+      0.69903924
+    ],
+    "components_used": [
+      "pop",
+      "infra"
+    ],
+    "method": "Fixed quantiles (0.20, 0.40, 0.60, 0.80) of the study-area Impact Exposure Index distribution (computed without fuel component: pop+infra only; weights renormalized: pop 0.35/0.65, infra 0.30/0.65); frozen at build time.",
+    "quantiles": [
+      0.2,
+      0.4,
+      0.6,
+      0.8
+    ],
+    "iei_weights": {
+      "population": 0.5384615384615385,
+      "infrastructure": 0.46153846153846156
+    },
+    "infra_subweights": {
+      "road": 0.45,
+      "building": 0.35,
+      "critical": 0.2
+    },
+    "note": "Thresholds describe this study area only. Computed without fuel component. They are not validated damage probabilities."
+  },
+  "artifacts": {
+    "cell_exposure": {
+      "path": "cell_exposure.parquet",
+      "rows": 175,
+      "columns": [
+        "cell_id",
+        "lat_cell",
+        "lon_cell",
+        "cell_area_km2",
+        "lc_tree_km2",
+        "lc_shrub_km2",
+        "lc_grass_km2",
+        "lc_crop_km2",
+        "lc_bare_km2",
+        "lc_built_km2",
+        "lc_water_km2",
+        "lc_other_km2",
+        "fuel_area_km2",
+        "pop_cell",
+        "pop_5km",
+        "pop_10km",
+        "pop_25km",
+        "road_km_total",
+        "road_km_primary",
+        "road_km_secondary",
+        "road_km_tertiary",
+        "road_km_track",
+        "building_count",
+        "building_footprint_km2",
+        "critical_count_total",
+        "critical_hospital_count",
+        "critical_school_count",
+        "critical_power_count",
+        "critical_airport_count",
+        "critical_water_count",
+        "critical_emergency_count",
+        "settlement_count",
+        "settlement_population"
+      ],
+      "sha256": "9ff4b7d0515da70ae904822dbaa4ec634eb1276765089c9a972030daec8afb41"
+    },
+    "settlements": {
+      "path": "cell_settlements.parquet",
+      "rows": 14248,
+      "columns": [
+        "lat_cell",
+        "lon_cell",
+        "settlement_name",
+        "population",
+        "distance_km"
+      ],
+      "sha256": "1fb2de9ddf3b5d9b3ae6cab8d5fc5cc24489960a26f672999027743209e28674"
+    },
+    "infrastructure": {
+      "path": "cell_infrastructure.parquet",
+      "rows": 6591,
+      "columns": [
+        "lat_cell",
+        "lon_cell",
+        "category",
+        "asset_name"
+      ],
+      "sha256": "e8cdba468d3a19ca38e4a2f13a8eba5c2c7309dd9d19ef5aecce2f0a70b6778d"
+    },
+    "excluded_cells": {
+      "path": "excluded_cells.parquet",
+      "rows": 34,
+      "columns": [
+        "cell_id",
+        "lat_cell",
+        "lon_cell",
+        "pop_status",
+        "reason"
+      ],
+      "sha256": "b678a126d1308fd0c718a9b718d995062449f5f3a642e2165bf839a1a8999605"
+    },
+    "ring_exposure": {
+      "path": "cell_ring_exposure.parquet",
+      "rows": 525,
+      "columns": [
+        "cell_id",
+        "lat_cell",
+        "lon_cell",
+        "ring_km",
+        "cell_area_km2",
+        "population",
+        "road_km",
+        "building_count",
+        "building_footprint_km2",
+        "critical_count"
+      ],
+      "sha256": "7ec6272b13b117cf6aa810f0738ba5576624741e4f9eba71148ed6336a1810b6"
+    }
+  },
+  "phase_2": {
+    "burned_area": "Not built. Confirmed burned area must come from an independent product (MCD64A1/VNP64A1, ESA CCI Fire or Copernicus EMS)."
+  }
+}
