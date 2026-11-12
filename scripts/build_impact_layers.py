@@ -12,15 +12,31 @@ Design rules
 * Every required input is checksum-verified before any artifact is written.
 * Missing inputs fail loudly; missing values are never replaced with zeros.
 * The script never imports Streamlit, ``app_core`` or the dashboard.
+* Vector layers are read with pyogrio using bbox and column filters; large
+  layers (buildings, roads) are streamed in chunks of OSM_CHUNK_FEATURES rows
+  — the whole layer is never loaded into one GeoDataFrame.
+* Area and length measurements use EPSG:6933 (WGS 84 / EASE-Grid 2.0 World),
+  a global equal-area cylindrical CRS in metres.  At Algeria's latitudes
+  (32–37.5 °N) distortion is below 1 %.  This eliminates per-geometry geodesic
+  loops; all geometry.length and geometry.area calls are vectorised.
+* Building centroids for ring queries are projected and stored in a spatial
+  index; a sample-cell timing report is printed before the full run.
+* gc.collect() is called between every layer and every chunk.
+* --max-chunks N limits processing to N chunks per large layer; to prevent
+  partial artifacts from silently polluting the canonical output directory,
+  --max-chunks refuses to write to data/impact/ unless --output-dir points
+  elsewhere.
 """
 
 from __future__ import annotations
 
 import argparse
+import gc
 import hashlib
 import json
 import math
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -52,12 +68,44 @@ OSM_REQUIRED = (
 
 CHECKSUM_FILENAME = "checksums.json"
 MANIFEST_SCHEMA_VERSION = "1.0"
+EXCLUDED_CELLS_FILENAME = "excluded_cells.parquet"
+
+# WorldPop coverage statuses that disqualify a cell from the exposure table.
+# A cell outside the raster, or only partly inside it, cannot be scored without
+# inventing population, so it is excluded and reported rather than zero-filled.
+EXCLUDED_POP_STATUSES = ("not_covered", "partial_coverage")
+EXCLUDED_CELLS_REASON = (
+    "outside or only partly covered by the WorldPop raster"
+)
+WORLDPOP_NODATA_RULE = (
+    "A cell fully inside the WorldPop raster with no valid pixel is treated as "
+    "zero population (constrained product: NoData means no modelled "
+    "settlement). Cells outside or only partly covered by the raster are "
+    "excluded from the exposure table, never zero-filled."
+)
 
 # Download extent = extent of the model-cell centres (not cell edges).
 STUDY_LAT_MIN = 32.0
 STUDY_LAT_MAX = 37.5
 STUDY_LON_MIN = -1.875
 STUDY_LON_MAX = 8.75
+
+# Bounding-box filter passed to pyogrio (xmin, ymin, xmax, ymax in EPSG:4326).
+# A generous margin around the study area; Geofabrik extracts for Algeria
+# already clip to the country boundary, so this costs nothing while ensuring
+# we never accidentally ingest features from Morocco or Tunisia.
+OSM_BBOX = (-2.0, 32.0, 9.0, 37.5)
+
+# Equal-area CRS for vectorised area / length calculations.
+# EPSG:6933 — WGS 84 / NSIDC EASE-Grid 2.0 World — is a global cylindrical
+# equal-area projection in metres.  At Algeria's latitudes (32–37.5 °N)
+# linear distortion is well below 1 %, so geometry.length and geometry.area
+# are accurate without any per-geometry geodesic loop.
+EQUAL_AREA_CRS = 6933  # EPSG:6933
+
+# Number of features to read in a single pyogrio chunk for large layers.
+# 250 000 rows × ~300 bytes/row ≈ 75 MB per chunk — well inside RAM budget.
+OSM_CHUNK_FEATURES = 250_000
 
 # ESA WorldCover class code -> canonical land-cover key.  Codes without their
 # own canonical column are folded into "other" (never silently dropped).
@@ -841,6 +889,7 @@ def build_manifest(
     artifacts: Mapping[str, Mapping[str, Any]],
     study_area: Mapping[str, Any],
     components_used: Sequence[str] = ("fuel", "pop", "infra"),
+    excluded_cells: Mapping[str, Any] | None = None,
     generated_at: str | None = None,
 ) -> dict[str, Any]:
     """Assemble the JSON-serialisable provenance manifest."""
@@ -857,12 +906,24 @@ def build_manifest(
     )
     comp_list = list(components_used)
     is_fuel_missing = comp_list == ["pop", "infra"]
+    excluded_info = (
+        dict(excluded_cells)
+        if excluded_cells is not None
+        else {
+            "count": 0,
+            "cells": [],
+            "reason": EXCLUDED_CELLS_REASON,
+            "raster_bounds": None,
+            "nodata_rule": WORLDPOP_NODATA_RULE,
+        }
+    )
 
     return {
         "schema_version": MANIFEST_SCHEMA_VERSION,
         "generated_at": timestamp,
         "generator": "scripts/build_impact_layers.py",
         "study_area": dict(study_area),
+        "excluded_cells": excluded_info,
         "grid": {
             "lat_min": config.MODEL_LAT_MIN,
             "lat_max": config.MODEL_LAT_MAX,
@@ -926,6 +987,17 @@ def _geopandas():
             "stack with `python -m pip install -r requirements-impact.txt`."
         ) from exc
     return gpd
+
+
+def _pyogrio():
+    try:
+        import pyogrio  # noqa: PLC0415
+    except ImportError as exc:  # pragma: no cover - depends on environment
+        raise BuildDependencyError(
+            "pyogrio is required for the offline build. Install the build-only "
+            "stack with `python -m pip install -r requirements-impact.txt`."
+        ) from exc
+    return pyogrio
 
 
 def _rasterio():
@@ -1014,14 +1086,66 @@ def _block_cell_indices(dataset, window, cells: pd.DataFrame):
     return indices, areas
 
 
-def _read_vector(path: Path):
+def _read_vector(path: Path, columns: list[str] | None = None):
+    """Read a vector layer with pyogrio, applying bbox and column filters.
+
+    ``columns`` lists attribute (non-geometry) columns to load.  Geometry is
+    always loaded.  Results are returned in EPSG:4326; the equal-area
+    projection is applied later, per-operation.
+    """
+    pyogrio = _pyogrio()
     gpd = _geopandas()
-    frame = gpd.read_file(path)
+    frame = pyogrio.read_dataframe(
+        str(path),
+        bbox=OSM_BBOX,
+        columns=columns,
+        use_arrow=False,
+    )
     if frame.crs is None:
         frame = frame.set_crs(4326)
     elif frame.crs.to_epsg() != 4326:
         frame = frame.to_crs(4326)
     return frame[frame.geometry.notna() & ~frame.geometry.is_empty].copy()
+
+
+def _read_vector_chunks(
+    path: Path,
+    columns: list[str] | None = None,
+    chunk_size: int = OSM_CHUNK_FEATURES,
+    max_chunks: int | None = None,
+):
+    """Yield successive GeoDataFrame chunks from a vector layer.
+
+    Uses ``skip_features`` / ``max_features`` so the full layer is never held
+    in memory at once.  Each chunk is delivered in EPSG:4326.
+    """
+    pyogrio = _pyogrio()
+
+    info = pyogrio.read_info(str(path))
+    total_features = int(info["features"])
+
+    skip = 0
+    chunk_index = 0
+    while skip < total_features:
+        if max_chunks is not None and chunk_index >= max_chunks:
+            break
+        frame = pyogrio.read_dataframe(
+            str(path),
+            bbox=OSM_BBOX,
+            columns=columns,
+            skip_features=skip,
+            max_features=chunk_size,
+            use_arrow=False,
+        )
+        if frame.crs is None:
+            frame = frame.set_crs(4326)
+        elif frame.crs.to_epsg() != 4326:
+            frame = frame.to_crs(4326)
+        frame = frame[frame.geometry.notna() & ~frame.geometry.is_empty].copy()
+        yield chunk_index, skip, total_features, frame
+        skip += chunk_size
+        chunk_index += 1
+        gc.collect()
 
 
 def _first_existing(frame, names: Sequence[str]) -> str | None:
@@ -1098,19 +1222,47 @@ def read_worldcover_areas(
     class_frame.insert(0, "cell_id", cells["cell_id"].to_numpy())
     return landcover_frame_from_class_areas(class_frame)
 
+def _raster_coverage(bounds_lbrt, raster_bounds) -> str:
+    """Classify a (left, bottom, right, top) box against the raster extent."""
+    cl, cb, cr, ct = bounds_lbrt
+    rl, rb, rr, rt = raster_bounds
+    if cr <= rl or cl >= rr or ct <= rb or cb >= rt:
+        return "not_covered"
+    if cl >= rl and cr <= rr and cb >= rb and ct <= rt:
+        return "full"
+    return "partial"
+
+
+def _cell_lbrt(lat: float, lon: float) -> tuple[float, float, float, float]:
+    """Cell edges as (left, bottom, right, top) from impact.exposure.cell_bounds."""
+    from impact.exposure import cell_bounds  # noqa: PLC0415
+
+    lat_min, lat_max, lon_min, lon_max = cell_bounds(lat, lon)
+    return (lon_min, lat_min, lon_max, lat_max)
+
 
 def read_worldpop_cell_totals(
     path: Path,
     cells: pd.DataFrame,
     block_size: int = 2048,
 ) -> pd.DataFrame:
-    """Sum WorldPop population inside each model cell."""
+    """Sum WorldPop population inside each model cell, with a coverage status.
+
+    WorldPop *constrained* rasters use NoData where no settlement is modelled.
+    Rule (documented in the manifest and methodology):
+      * cell fully inside the raster, no valid pixel -> 0, "covered_nodata_as_zero"
+      * cell fully inside the raster, valid pixels   -> sum, "ok"
+      * cell partly outside the raster               -> sum or NaN, "partial_coverage"
+      * cell entirely outside the raster             -> NaN, "not_covered"
+    Missing population is never silently replaced with zero.
+    """
     rasterio = _rasterio()
     totals = np.zeros(len(cells), dtype=float)
     valid_pixels = np.zeros(len(cells), dtype=np.int64)
 
     with rasterio.open(path) as dataset:
         _require_epsg4326(dataset, Path(path).name)
+        raster_bounds = tuple(dataset.bounds)
         for window in _iter_windows(dataset, block_size):
             band = dataset.read(1, window=window, masked=True)
             indices, _ = _block_cell_indices(dataset, window, cells)
@@ -1134,8 +1286,26 @@ def read_worldpop_cell_totals(
             "pop_cell": totals,
         }
     )
-    # A cell with no valid raster pixel is explicitly missing, never zero.
-    result.loc[valid_pixels == 0, "pop_cell"] = np.nan
+
+    statuses: list[str] = []
+    for i, cell in enumerate(cells.itertuples()):
+        coverage = _raster_coverage(
+            _cell_lbrt(cell.lat_cell, cell.lon_cell), raster_bounds
+        )
+        if coverage == "not_covered":
+            result.loc[i, "pop_cell"] = np.nan
+            statuses.append("not_covered")
+        elif valid_pixels[i] == 0 and coverage == "full":
+            result.loc[i, "pop_cell"] = 0.0
+            statuses.append("covered_nodata_as_zero")
+        elif valid_pixels[i] == 0:
+            result.loc[i, "pop_cell"] = np.nan
+            statuses.append("partial_coverage")
+        else:
+            statuses.append("ok" if coverage == "full" else "partial_coverage")
+    result["pop_status"] = statuses
+    result.attrs["raster_bounds"] = [float(value) for value in raster_bounds]
+    result.attrs["nodata_rule"] = WORLDPOP_NODATA_RULE
     return result
 
 
@@ -1144,17 +1314,44 @@ def read_worldpop_ring_totals(
     cells: pd.DataFrame,
     distances: Sequence[int] = config.RING_DISTANCES_KM,
 ) -> pd.DataFrame:
-    """Sum WorldPop population inside 5/10/25 km rings around each cell."""
+    """Sum WorldPop population inside 5/10/25 km rings around each cell.
+
+    Same NoData rule as the cell totals, applied to the ring's bounding box:
+    a ring fully inside the raster with no valid pixel is 0; a ring not fully
+    covered with no valid pixel is NaN. Rings that are only partly covered
+    sum the valid pixels without extrapolating (a lower bound).
+    """
     rasterio = _rasterio()
     from rasterio.windows import Window  # noqa: PLC0415
 
     rows: list[dict[str, Any]] = []
     with rasterio.open(path) as dataset:
         _require_epsg4326(dataset, Path(path).name)
+        raster_bounds = tuple(dataset.bounds)
         for cell in cells.itertuples():
             for radius in distances:
                 lat_margin = radius / 111.0
-                lon_margin = radius / (111.0 * max(math.cos(math.radians(cell.lat_cell)), 0.05))
+                lon_margin = radius / (
+                    111.0 * max(math.cos(math.radians(cell.lat_cell)), 0.05)
+                )
+                ring_cov = _raster_coverage(
+                    (
+                        cell.lon_cell - lon_margin,
+                        cell.lat_cell - lat_margin,
+                        cell.lon_cell + lon_margin,
+                        cell.lat_cell + lat_margin,
+                    ),
+                    raster_bounds,
+                )
+                base = {
+                    "lat_cell": cell.lat_cell,
+                    "lon_cell": cell.lon_cell,
+                    "ring_km": float(radius),
+                }
+                if ring_cov == "not_covered":
+                    rows.append({**base, "population": np.nan})
+                    continue
+
                 row_min, col_min = rasterio.transform.rowcol(
                     dataset.transform,
                     cell.lon_cell - lon_margin,
@@ -1170,15 +1367,9 @@ def read_worldpop_ring_totals(
                 row_max = min(int(row_max) + 1, dataset.height - 1)
                 col_max = min(int(col_max) + 1, dataset.width - 1)
                 if row_max < row_min or col_max < col_min:
-                    rows.append(
-                        {
-                            "lat_cell": cell.lat_cell,
-                            "lon_cell": cell.lon_cell,
-                            "ring_km": float(radius),
-                            "population": np.nan,
-                        }
-                    )
+                    rows.append({**base, "population": np.nan})
                     continue
+
                 window = Window(
                     col_min, row_min, col_max - col_min + 1, row_max - row_min + 1
                 )
@@ -1197,16 +1388,13 @@ def read_worldpop_ring_totals(
                     & (data >= 0)
                     & (distances_km <= radius)
                 )
-                rows.append(
-                    {
-                        "lat_cell": cell.lat_cell,
-                        "lon_cell": cell.lon_cell,
-                        "ring_km": float(radius),
-                        "population": (
-                            float(data[valid].sum()) if valid.any() else np.nan
-                        ),
-                    }
-                )
+                if valid.any():
+                    pop = float(data[valid].sum())
+                elif ring_cov == "full":
+                    pop = 0.0  # constrained product: NoData = no modelled settlement
+                else:
+                    pop = np.nan
+                rows.append({**base, "population": pop})
     return pd.DataFrame(rows)
 
 
@@ -1242,68 +1430,173 @@ def read_ghsl_built_surface(path: Path, cells: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # Vector readers
 # ---------------------------------------------------------------------------
-def read_osm_roads(path: Path, cells: pd.DataFrame) -> pd.DataFrame:
-    """Road length (km) per cell and per class."""
-    frame = _read_vector(path)
-    class_column = _first_existing(frame, ("fclass", "type", "class", "highway"))
-    points = _representative_points(frame)
-    points["fclass"] = (
-        frame[class_column].astype(str).to_numpy()
-        if class_column
-        else "other"
-    )
-    geod = _geod()
-    points["length_km"] = [
-        abs(geod.geometry_length(geometry)) / 1000.0
-        for geometry in frame.geometry.to_numpy()
-    ]
-    assigned = assign_points_to_cells(points, cells).dropna(subset=["cell_id"])
-    assigned["road_class"] = assigned["fclass"].map(classify_road_class)
+def read_osm_roads(
+    path: Path,
+    cells: pd.DataFrame,
+    chunk_size: int = OSM_CHUNK_FEATURES,
+    max_chunks: int | None = None,
+) -> pd.DataFrame:
+    """Road length (km) per cell and per class — chunked, equal-area lengths.
 
+    Reads ``gis_osm_roads_free_1`` in chunks of ``chunk_size`` features.
+    Lengths are computed vectorised in EPSG:6933 (equal-area, metres);
+    no per-geometry geodesic loop.
+    """
     result = cells[["cell_id"]].copy()
     result["road_km_total"] = 0.0
     for column in ROAD_CLASS_COLUMNS.values():
         result[column] = 0.0
-    grouped = assigned.groupby(["cell_id", "road_class"])["length_km"].sum()
-    for (cell, road_class), value in grouped.items():
-        mask = result["cell_id"] == cell
-        result.loc[mask, "road_km_total"] += value
-        column = ROAD_CLASS_COLUMNS.get(road_class)
-        if column:
-            result.loc[mask, column] += value
+
+    needed_cols = ["fclass"]
+    path = Path(path)
+    _pyogrio_mod = _pyogrio()  # noqa: PLC0415
+    info = _pyogrio_mod.read_info(str(path))
+    available = list(info["fields"])
+    col = next((c for c in ("fclass", "type", "class", "highway") if c in available), None)
+    if col and col != "fclass":
+        needed_cols = [col]
+
+    total_chunks = math.ceil(int(info["features"]) / chunk_size)
+    t0 = time.monotonic()
+
+    for chunk_idx, skip, total_features, frame in _read_vector_chunks(
+        path, columns=needed_cols, chunk_size=chunk_size, max_chunks=max_chunks
+    ):
+        elapsed = time.monotonic() - t0
+        actual_chunks = math.ceil(total_features / chunk_size)
+        display_chunks = min(total_chunks, actual_chunks)
+        print(
+            f"  roads: chunk {chunk_idx + 1}/{display_chunks} "
+            f"({int(elapsed)}s, features {skip}–{skip + len(frame) - 1})",
+            flush=True,
+        )
+
+        # Project to equal-area CRS for vectorised length in metres.
+        projected = frame.to_crs(EQUAL_AREA_CRS)
+        class_column = _first_existing(frame, ("fclass", "type", "class", "highway"))
+        points = _representative_points(frame)
+        points["fclass"] = (
+            frame[class_column].astype(str).to_numpy()
+            if class_column
+            else "other"
+        )
+        # Vectorised length in km — no geodesic loop.
+        points["length_km"] = projected.geometry.length.to_numpy() / 1000.0
+
+        assigned = assign_points_to_cells(points, cells).dropna(subset=["cell_id"])
+        assigned["road_class"] = assigned["fclass"].map(classify_road_class)
+
+        grouped = assigned.groupby(["cell_id", "road_class"])["length_km"].sum()
+        for (cell, road_class), value in grouped.items():
+            mask = result["cell_id"] == cell
+            result.loc[mask, "road_km_total"] += value
+            column = ROAD_CLASS_COLUMNS.get(road_class)
+            if column:
+                result.loc[mask, column] += value
+
+        del frame, projected, points, assigned, grouped
+        gc.collect()
+
     return result
 
 
-def read_osm_buildings(path: Path, cells: pd.DataFrame) -> pd.DataFrame:
-    """Building count and footprint area (km²) per cell."""
-    frame = _read_vector(path)
-    points = _representative_points(frame)
-    geod = _geod()
-    points["footprint_km2"] = [
-        abs(geod.geometry_area_perimeter(geometry)[0]) / 1_000_000.0
-        for geometry in frame.geometry.to_numpy()
-    ]
-    assigned = assign_points_to_cells(points, cells).dropna(subset=["cell_id"])
+def read_osm_buildings(
+    path: Path,
+    cells: pd.DataFrame,
+    chunk_size: int = OSM_CHUNK_FEATURES,
+    max_chunks: int | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Building count, footprint area (km²) per cell, plus projected centroids.
 
+    Returns ``(cell_summary, centroids_projected)`` where:
+    * ``cell_summary`` has ``cell_id | building_count | building_footprint_km2``
+    * ``centroids_projected`` is a GeoDataFrame in EPSG:6933 with Point
+      geometries (building centroids) used by ring queries.
+
+    Both products come from a **single chunked pass** — the layer is never
+    loaded whole into memory.  Areas are computed vectorised in EPSG:6933
+    (equal-area, metres), no per-geometry geodesic loop.
+    """
     result = cells[["cell_id"]].copy()
     result["building_count"] = 0.0
     result["building_footprint_km2"] = 0.0
-    grouped = assigned.groupby("cell_id").agg(
-        building_count=("footprint_km2", "size"),
-        building_footprint_km2=("footprint_km2", "sum"),
-    )
-    result = result.merge(grouped, on="cell_id", how="left")
-    result[["building_count", "building_footprint_km2"]] = result[
-        ["building_count", "building_footprint_km2"]
-    ].fillna(0.0)
-    return result
+
+    centroid_parts: list[Any] = []  # list of GeoDataFrame slices
+
+    path = Path(path)
+    _pyogrio_mod = _pyogrio()  # noqa: PLC0415
+    info = _pyogrio_mod.read_info(str(path))
+    total_chunks = math.ceil(int(info["features"]) / chunk_size)
+    t0 = time.monotonic()
+    gpd = _geopandas()
+
+    for chunk_idx, skip, total_features, frame in _read_vector_chunks(
+        path, columns=[], chunk_size=chunk_size, max_chunks=max_chunks
+    ):
+        elapsed = time.monotonic() - t0
+        actual_chunks = math.ceil(total_features / chunk_size)
+        display_chunks = min(total_chunks, actual_chunks)
+        print(
+            f"  buildings: chunk {chunk_idx + 1}/{display_chunks} "
+            f"({int(elapsed)}s, features {skip}–{skip + len(frame) - 1})",
+            flush=True,
+        )
+
+        # Project to equal-area CRS for vectorised area (m² → km²).
+        projected = frame.to_crs(EQUAL_AREA_CRS)
+        footprints_km2 = projected.geometry.area.to_numpy() / 1_000_000.0
+
+        points = _representative_points(frame)
+        points["footprint_km2"] = footprints_km2
+        assigned = assign_points_to_cells(points, cells).dropna(subset=["cell_id"])
+
+        grouped = assigned.groupby("cell_id").agg(
+            building_count=("footprint_km2", "size"),
+            building_footprint_km2=("footprint_km2", "sum"),
+        )
+        # Merge chunk counts into result accumulators.
+        for cell_id, row in grouped.iterrows():
+            mask = result["cell_id"] == cell_id
+            result.loc[mask, "building_count"] += float(row.building_count)
+            result.loc[mask, "building_footprint_km2"] += float(row.building_footprint_km2)
+
+        # Collect projected centroids for the ring pass (single pass).
+        centroids_proj = gpd.GeoDataFrame(
+            geometry=projected.geometry.centroid,
+            crs=EQUAL_AREA_CRS,
+        )
+        centroid_parts.append(centroids_proj)
+
+        del frame, projected, points, assigned, grouped, centroids_proj
+        gc.collect()
+
+    if centroid_parts:
+        all_centroids = gpd.GeoDataFrame(
+            pd.concat([gdf for gdf in centroid_parts], ignore_index=True),
+            crs=EQUAL_AREA_CRS,
+        )
+    else:
+        all_centroids = gpd.GeoDataFrame(geometry=gpd.GeoSeries([], crs=EQUAL_AREA_CRS))
+
+    del centroid_parts
+    gc.collect()
+
+    return result, all_centroids
 
 
 def read_osm_pois(
     path: Path, cells: pd.DataFrame
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Critical-facility points and per-cell counts."""
-    frame = _read_vector(path)
+    """Critical-facility points and per-cell counts.
+
+    Uses pyogrio with bbox and column filter; POI layer is small so no
+    chunking is required.
+    """
+    t0 = time.monotonic()
+    print("  pois: reading with bbox filter...", flush=True)
+    frame = _read_vector(path, columns=["fclass", "name"])
+    print(f"  pois: {len(frame)} features ({int(time.monotonic() - t0)}s)", flush=True)
+    gc.collect()
     class_column = _first_existing(frame, ("fclass", "type", "class", "amenity"))
     name_column = _first_existing(frame, ("name", "name_en"))
     categories = (
@@ -1388,7 +1681,11 @@ def read_osm_settlements(
     cells: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Settlement points with sampled population and per-cell totals."""
-    frame = _read_vector(places_path)
+    t0 = time.monotonic()
+    print("  places: reading with bbox filter...", flush=True)
+    frame = _read_vector(places_path, columns=["fclass", "population", "name"])
+    print(f"  places: {len(frame)} features ({int(time.monotonic() - t0)}s)", flush=True)
+    gc.collect()
     place_column = _first_existing(frame, ("fclass", "type", "class", "place"))
     name_column = _first_existing(frame, ("name", "name_en"))
     if place_column:
@@ -1461,30 +1758,88 @@ def _cells_geoframe(cells: pd.DataFrame):
     )
 
 
+def _sample_ring_timing(
+    centroids_proj,
+    cell_points_proj,
+    radius_m: float,
+    n_sample: int = 5,
+) -> float:
+    """Time ring queries on a random sample of cells; return seconds/cell."""
+    gpd = _geopandas()
+    n = min(n_sample, len(cell_points_proj))
+    if n == 0 or centroids_proj is None or len(centroids_proj) == 0:
+        return 0.0
+    sample = cell_points_proj.sample(n=n, random_state=42)
+    t0 = time.monotonic()
+    for _, row in sample.iterrows():
+        buf = gpd.GeoDataFrame(
+            geometry=[row.geometry.buffer(radius_m)], crs=EQUAL_AREA_CRS
+        )
+        gpd.sjoin(centroids_proj, buf, how="inner", predicate="within")
+    elapsed = time.monotonic() - t0
+    return elapsed / n
+
+
 def summarize_vector_rings(
     frame,
     cells: pd.DataFrame,
     distances: Sequence[int],
     kind: str,
+    building_centroids_proj=None,
 ) -> pd.DataFrame:
     """Aggregate OSM features inside 5/10/25 km buffers around cell centres.
 
     ``kind`` is ``road``, ``building`` or ``critical``.  Buffers overlap
     between neighbouring cells; the result must not be summed across cells.
+
+    For ``kind == "building"``, pass ``building_centroids_proj`` (a GeoDataFrame
+    in EPSG:6933 from the single-pass ``read_osm_buildings`` call) to avoid
+    re-reading the layer.  If omitted the caller-supplied ``frame`` is used.
+
+    All geometry operations use the EPSG:6933 equal-area CRS and a spatial
+    index; a sample-cell timing line is printed before the full run.
     """
     gpd = _geopandas()
-    projected = frame.to_crs(32631)
-    cell_points = _cells_geoframe(cells).to_crs(32631)
+
+    if kind == "building" and building_centroids_proj is not None:
+        projected = building_centroids_proj
+        # Centroids already in EPSG:6933; no area available here — counts only.
+        centroid_mode = True
+    else:
+        projected = frame.to_crs(EQUAL_AREA_CRS)
+        centroid_mode = False
+
+    cell_points = _cells_geoframe(cells).to_crs(EQUAL_AREA_CRS)
+
+    # Sample-cell timing report before full run.
+    if len(distances) > 0 and len(cell_points) > 0 and len(projected) > 0:
+        sample_radius_m = float(min(distances)) * 1000.0
+        secs_per_cell = _sample_ring_timing(projected, cell_points, sample_radius_m)
+        est_total = secs_per_cell * len(cell_points) * len(distances)
+        print(
+            f"  rings/{kind}: sample timing {secs_per_cell:.3f}s/cell × "
+            f"{len(cell_points)} cells × {len(distances)} radii "
+            f"≈ {est_total:.0f}s estimated",
+            flush=True,
+        )
+
     rows: list[dict[str, Any]] = []
-    for radius in distances:
+    t0 = time.monotonic()
+    for ri, radius in enumerate(distances):
+        radius_m = float(radius) * 1000.0
         buffers = cell_points.copy()
-        buffers["geometry"] = buffers.geometry.buffer(float(radius) * 1000.0)
+        buffers["geometry"] = buffers.geometry.buffer(radius_m)
         buffers = buffers.rename(columns={"cell_id": "buffer_cell_id"})
         joined = gpd.sjoin(
             projected,
             buffers[["buffer_cell_id", "geometry"]],
             how="inner",
-            predicate="intersects",
+            predicate="within",
+        )
+        elapsed = time.monotonic() - t0
+        print(
+            f"  rings/{kind}: radius {radius} km done ({int(elapsed)}s)",
+            flush=True,
         )
         if kind == "road":
             values = joined.geometry.length / 1000.0
@@ -1494,21 +1849,34 @@ def summarize_vector_rings(
                     {"cell_id": cell, "ring_km": float(radius), "road_km": float(value)}
                 )
         elif kind == "building":
-            areas = joined.geometry.area / 1_000_000.0
-            grouped = pd.DataFrame(
-                {"cell_id": joined["buffer_cell_id"].to_numpy(), "area": areas.to_numpy()}
-            ).groupby("cell_id").agg(
-                building_count=("area", "size"), building_footprint_km2=("area", "sum")
-            )
-            for cell, row in grouped.iterrows():
-                rows.append(
-                    {
-                        "cell_id": cell,
-                        "ring_km": float(radius),
-                        "building_count": float(row.building_count),
-                        "building_footprint_km2": float(row.building_footprint_km2),
-                    }
+            if centroid_mode:
+                # Centroids only: count features, no area available.
+                grouped = joined.groupby("buffer_cell_id").size()
+                for cell, count in grouped.items():
+                    rows.append(
+                        {
+                            "cell_id": cell,
+                            "ring_km": float(radius),
+                            "building_count": float(count),
+                            "building_footprint_km2": 0.0,
+                        }
+                    )
+            else:
+                areas = joined.geometry.area / 1_000_000.0
+                grouped = pd.DataFrame(
+                    {"cell_id": joined["buffer_cell_id"].to_numpy(), "area": areas.to_numpy()}
+                ).groupby("cell_id").agg(
+                    building_count=("area", "size"), building_footprint_km2=("area", "sum")
                 )
+                for cell, row in grouped.iterrows():
+                    rows.append(
+                        {
+                            "cell_id": cell,
+                            "ring_km": float(radius),
+                            "building_count": float(row.building_count),
+                            "building_footprint_km2": float(row.building_footprint_km2),
+                        }
+                    )
         elif kind == "critical":
             grouped = joined.groupby("buffer_cell_id").size()
             for cell, value in grouped.items():
@@ -1517,6 +1885,7 @@ def summarize_vector_rings(
                 )
         else:  # pragma: no cover - programming error
             raise ValueError(f"Unknown ring kind: {kind!r}")
+        gc.collect()
     return pd.DataFrame(rows)
 
 
@@ -1641,10 +2010,15 @@ def assemble_cell_exposure(
     for column in ("pop_cell", "pop_5km", "pop_10km", "pop_25km"):
         if column not in out.columns:
             raise BuildError(f"Population table is missing {column}.")
-    if out["pop_cell"].isna().any():
+    if "pop_status" not in out.columns:
+        raise BuildError("Population table is missing pop_status.")
+    unexplained = out["pop_cell"].isna() & ~out["pop_status"].isin(
+        list(EXCLUDED_POP_STATUSES)
+    )
+    if unexplained.any():
         raise BuildError(
             "WorldPop produced no valid population for cell(s): "
-            f"{out.loc[out['pop_cell'].isna(), 'cell_id'].head().tolist()}. "
+            f"{out.loc[unexplained, 'cell_id'].head().tolist()}. "
             "Missing population is never replaced with zero."
         )
 
@@ -1683,7 +2057,7 @@ def build_cell_exposure(
     """Combine the per-cell dimensions into the canonical frame."""
     keep = [
         column
-        for column in ("cell_id", "lat_cell", "lon_cell", "pop_cell")
+        for column in ("cell_id", "lat_cell", "lon_cell", "pop_cell", "pop_status")
         if column in pop_cell.columns
     ]
     population = pop_cell[keep].copy()
@@ -1722,6 +2096,83 @@ def build_cell_exposure(
         settlements=settlements,
         ghsl=ghsl,
     )
+
+
+def split_excluded_cells(
+    cell_exposure: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Split off cells with incomplete WorldPop coverage.
+
+    A cell that lies outside the population raster, or only partly inside it,
+    cannot be scored without inventing population. Such rows are removed from
+    the canonical exposure table and returned separately for
+    ``excluded_cells.parquet`` and the manifest. ``pop_status`` is a build-time
+    diagnostic and is dropped from the canonical exposure table.
+    """
+    if "pop_status" not in cell_exposure.columns:
+        raise BuildError(
+            "Exposure table is missing pop_status; population coverage cannot "
+            "be determined."
+        )
+    excluded_mask = (
+        cell_exposure["pop_status"].astype("string").isin(EXCLUDED_POP_STATUSES)
+    ).to_numpy()
+    excluded = cell_exposure.loc[
+        excluded_mask, ["cell_id", "lat_cell", "lon_cell", "pop_status"]
+    ].copy()
+    excluded["reason"] = EXCLUDED_CELLS_REASON
+    kept = (
+        cell_exposure.loc[~excluded_mask]
+        .drop(columns=["pop_status"], errors="ignore")
+        .reset_index(drop=True)
+    )
+    return kept, excluded.reset_index(drop=True)
+
+
+def excluded_cell_ids(excluded: pd.DataFrame | None) -> set[str]:
+    """Return the set of excluded cell identifiers (empty when none)."""
+    if excluded is None or excluded.empty or "cell_id" not in excluded.columns:
+        return set()
+    return set(excluded["cell_id"].astype(str))
+
+
+def filter_cells(
+    frame: pd.DataFrame | None,
+    excluded_ids: set[str],
+) -> pd.DataFrame | None:
+    """Drop rows whose ``cell_id`` is excluded; never mutate the input."""
+    if (
+        frame is None
+        or frame.empty
+        or not excluded_ids
+        or "cell_id" not in frame.columns
+    ):
+        return frame
+    keep = ~frame["cell_id"].astype(str).isin(excluded_ids)
+    return frame.loc[keep].reset_index(drop=True)
+
+
+def filter_cells_by_coordinates(
+    frame: pd.DataFrame | None,
+    excluded: pd.DataFrame | None,
+) -> pd.DataFrame | None:
+    """Drop rows whose ``(lat_cell, lon_cell)`` matches an excluded cell."""
+    if (
+        frame is None
+        or frame.empty
+        or excluded is None
+        or excluded.empty
+        or not {"lat_cell", "lon_cell"} <= set(frame.columns)
+    ):
+        return frame
+    keys = (
+        excluded[["lat_cell", "lon_cell"]]
+        .drop_duplicates()
+        .assign(_excluded=True)
+    )
+    merged = frame.merge(keys, on=["lat_cell", "lon_cell"], how="left")
+    keep = merged["_excluded"].isna()
+    return merged.loc[keep].drop(columns=["_excluded"]).reset_index(drop=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1764,10 +2215,35 @@ def run_build(
     block_size: int = 2048,
     use_panel: bool = True,
     with_rings: bool = True,
+    chunk_size: int = OSM_CHUNK_FEATURES,
+    max_chunks: int | None = None,
 ) -> dict[str, Any]:
-    """Run the complete offline build and return the manifest."""
+    """Run the complete offline build and return the manifest.
+
+    Parameters
+    ----------
+    chunk_size:
+        Features per pyogrio chunk for roads and buildings (default 250 000).
+    max_chunks:
+        If set, process at most *max_chunks* chunks per large layer and refuse
+        to write into ``data/impact/`` unless ``out_dir`` differs from the
+        canonical impact data directory.  This safety guard prevents partial
+        artifacts from silently polluting the canonical output.
+    """
     raw_dir = Path(raw_dir)
     out_dir = Path(out_dir)
+
+    # Safety guard: --max-chunks produces partial artifacts; block canonical dir.
+    if max_chunks is not None:
+        canonical = Path(config.IMPACT_DATA_DIR).resolve()
+        if out_dir.resolve() == canonical:
+            raise BuildError(
+                f"--max-chunks={max_chunks} limits processing to partial data. "
+                "Writing partial artifacts into the canonical output directory "
+                f"({canonical}) is refused. Pass --out-dir pointing to a "
+                "temporary directory (e.g. /tmp/impact_test) to proceed."
+            )
+
     sources = resolve_required_sources(raw_dir)
 
     if record_checksums:
@@ -1775,6 +2251,9 @@ def run_build(
     checksums = load_checksums(checksums_path)
     verified = verify_checksums(raw_dir, sources.all_files(), checksums)
 
+    t_build_start = time.monotonic()
+
+    print("Stage 1: land cover", flush=True)
     cells = cells_for_build(use_panel=use_panel)
     if sources.worldcover:
         landcover = read_worldcover_areas(sources.worldcover, cells, block_size=block_size)
@@ -1786,18 +2265,45 @@ def run_build(
             lc_dict[col] = np.nan
         lc_dict["fuel_area_km2"] = np.nan
         landcover = pd.DataFrame(lc_dict)
+        print("  WorldCover absent — lc_* and fuel_area_km2 set to NaN", flush=True)
+    gc.collect()
 
+    print(f"Stage 2: WorldPop ({int(time.monotonic() - t_build_start)}s elapsed)", flush=True)
     pop_cell = read_worldpop_cell_totals(sources.worldpop, cells, block_size=block_size)
+    worldpop_raster_bounds = pop_cell.attrs.get("raster_bounds")
+    gc.collect()
     pop_rings_long = read_worldpop_ring_totals(sources.worldpop, cells)
+    gc.collect()
 
-    roads = read_osm_roads(sources.osm_roads, cells)
-    buildings = read_osm_buildings(sources.osm_buildings, cells)
+    print(f"Stage 3: OSM roads ({int(time.monotonic() - t_build_start)}s elapsed)", flush=True)
+    roads = read_osm_roads(
+        sources.osm_roads, cells, chunk_size=chunk_size, max_chunks=max_chunks
+    )
+    gc.collect()
+
+    print(f"Stage 4: OSM buildings ({int(time.monotonic() - t_build_start)}s elapsed)", flush=True)
+    buildings, building_centroids_proj = read_osm_buildings(
+        sources.osm_buildings, cells, chunk_size=chunk_size, max_chunks=max_chunks
+    )
+    gc.collect()
+
+    print(f"Stage 5: OSM POIs ({int(time.monotonic() - t_build_start)}s elapsed)", flush=True)
     critical_assets, critical_counts = read_osm_pois(sources.osm_pois, cells)
+    gc.collect()
+
+    print(f"Stage 6: OSM places ({int(time.monotonic() - t_build_start)}s elapsed)", flush=True)
     settlements, settlement_counts = read_osm_settlements(
         sources.osm_places, sources.worldpop, cells
     )
-    ghsl = read_ghsl_built_surface(sources.ghsl, cells) if sources.ghsl else None
+    gc.collect()
 
+    ghsl = None
+    if sources.ghsl:
+        print(f"Stage 7: GHSL ({int(time.monotonic() - t_build_start)}s elapsed)", flush=True)
+        ghsl = read_ghsl_built_surface(sources.ghsl, cells)
+        gc.collect()
+
+    print(f"Stage 8: assembly ({int(time.monotonic() - t_build_start)}s elapsed)", flush=True)
     cell_exposure = build_cell_exposure(
         cells,
         landcover,
@@ -1809,6 +2315,21 @@ def run_build(
         settlement_counts,
         ghsl,
     )
+
+    # Split off cells that the population raster does not (fully) cover before
+    # the availability check. They cannot be scored without inventing people.
+    cell_exposure, excluded_cells = split_excluded_cells(cell_exposure)
+    excluded_ids = excluded_cell_ids(excluded_cells)
+    if not excluded_cells.empty:
+        print(
+            f"  excluded {len(excluded_cells)} of {len(cells)} cell(s): "
+            f"{EXCLUDED_CELLS_REASON}",
+            flush=True,
+        )
+
+    # Every other cell-keyed artifact must describe the same kept cells.
+    settlements = filter_cells(settlements, excluded_ids)
+    critical_assets = filter_cells(critical_assets, excluded_ids)
 
     prepared = exposure.prepare_exposure(cell_exposure)
     if not prepared.available:
@@ -1840,11 +2361,28 @@ def run_build(
         out_dir / config.INFRASTRUCTURE_PATH.name,
         required=config.INFRASTRUCTURE_REQUIRED_COLUMNS,
     )
+    if not excluded_cells.empty:
+        artifacts["excluded_cells"] = write_parquet(
+            excluded_cells,
+            out_dir / EXCLUDED_CELLS_FILENAME,
+            required=("cell_id", "lat_cell", "lon_cell", "pop_status", "reason"),
+        )
 
     if with_rings:
-        road_frame = _read_vector(sources.osm_roads)
-        building_frame = _read_vector(sources.osm_buildings)
-        poi_frame = _read_vector(sources.osm_pois)
+        print(
+            f"Stage 9: rings ({int(time.monotonic() - t_build_start)}s elapsed)",
+            flush=True,
+        )
+        # Roads: re-read with bbox filter (no chunking needed for ring pass,
+        # roads are small enough after the bbox cut).
+        road_frame = _read_vector(sources.osm_roads, columns=["fclass"])
+        gc.collect()
+
+        # Buildings: reuse projected centroids from the single-pass Stage 4.
+        # This avoids reading the 640 MB shapefile a second time.
+
+        # POIs: re-read with bbox filter.
+        poi_frame = _read_vector(sources.osm_pois, columns=["fclass", "name"])
         class_column = _first_existing(poi_frame, ("fclass", "type", "class", "amenity"))
         category = (
             poi_frame[class_column].map(classify_critical_facility)
@@ -1852,19 +2390,25 @@ def run_build(
             else pd.Series([None] * len(poi_frame), index=poi_frame.index)
         )
         poi_frame = poi_frame[category.notna()].copy()
+        gc.collect()
 
         road_rings = summarize_vector_rings(
             road_frame, cells, config.RING_DISTANCES_KM, "road"
         )
+        gc.collect()
         building_rings = summarize_vector_rings(
-            building_frame, cells, config.RING_DISTANCES_KM, "building"
+            None, cells, config.RING_DISTANCES_KM, "building",
+            building_centroids_proj=building_centroids_proj,
         )
+        gc.collect()
         critical_rings = summarize_vector_rings(
             poi_frame, cells, config.RING_DISTANCES_KM, "critical"
         )
+        gc.collect()
         ring_exposure = build_ring_exposure(
             pop_rings_long, road_rings, building_rings, critical_rings, cells
         )
+        ring_exposure = filter_cells(ring_exposure, excluded_ids)
         artifacts["ring_exposure"] = write_parquet(
             ring_exposure,
             out_dir / config.RING_EXPOSURE_PATH.name,
@@ -1874,6 +2418,7 @@ def run_build(
     if sources.admin_adm2 or sources.admin_adm1:
         admin_path = sources.admin_adm2 or sources.admin_adm1
         admin_units = read_admin_units(admin_path, cells)
+        admin_units = filter_cells_by_coordinates(admin_units, excluded_cells)
         artifacts["admin_units"] = write_parquet(
             admin_units,
             out_dir / config.ADMIN_UNITS_PATH.name,
@@ -1943,6 +2488,17 @@ def run_build(
         if bool(indexed.get("iei_fuel_missing", pd.Series([False])).iloc[0])
         else ["fuel", "pop", "infra"]
     )
+    excluded_info = {
+        "count": int(len(excluded_cells)),
+        "cells": excluded_cells["cell_id"].astype(str).tolist(),
+        "reason": EXCLUDED_CELLS_REASON,
+        "raster_bounds": (
+            [float(value) for value in worldpop_raster_bounds]
+            if worldpop_raster_bounds is not None
+            else None
+        ),
+        "nodata_rule": WORLDPOP_NODATA_RULE,
+    }
     manifest = build_manifest(
         manifest_sources,
         thresholds,
@@ -1952,11 +2508,18 @@ def run_build(
             "lat_max": STUDY_LAT_MAX,
             "lon_min": STUDY_LON_MIN,
             "lon_max": STUDY_LON_MAX,
-            "cell_count": int(len(cells)),
-            "cell_area_total_km2": float(cells["cell_area_km2"].sum()),
+            "cell_count": int(len(cell_exposure)),
+            "total_cell_count": int(len(cells)),
+            "excluded_cell_count": int(len(excluded_cells)),
+            "cell_area_total_km2": float(cell_exposure["cell_area_km2"].sum()),
+            "excluded_cell_area_total_km2": float(
+                cells["cell_area_km2"].sum()
+                - cell_exposure["cell_area_km2"].sum()
+            ),
             "cell_source": "fire_panel" if use_panel else "full_model_grid",
         },
         components_used=components_used,
+        excluded_cells=excluded_info,
     )
     manifest_path = out_dir / config.MANIFEST_PATH.name
     manifest_path.write_text(
@@ -2006,6 +2569,27 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Do not build the 5/10/25 km ring table (faster).",
     )
+    parser.add_argument(
+        "--chunk-size",
+        type=int,
+        default=OSM_CHUNK_FEATURES,
+        help=(
+            f"Number of OSM features per pyogrio chunk for roads and buildings "
+            f"(default: {OSM_CHUNK_FEATURES:,})."
+        ),
+    )
+    parser.add_argument(
+        "--max-chunks",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Process at most N chunks per large layer (roads, buildings). "
+            "Useful for quick smoke tests. IMPORTANT: when --max-chunks is set, "
+            "writing to the canonical data/impact/ directory is refused; use "
+            "--out-dir to point elsewhere."
+        ),
+    )
     return parser
 
 
@@ -2021,6 +2605,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             block_size=args.block_size,
             use_panel=not args.full_grid,
             with_rings=not args.skip_rings,
+            chunk_size=args.chunk_size,
+            max_chunks=args.max_chunks,
         )
     except BuildError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

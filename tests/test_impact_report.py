@@ -177,6 +177,33 @@ def test_reports_never_assert_forbidden_claims():
             assert phrase not in lowered, (label, phrase)
 
 
+def test_reports_state_excluded_population_raster_cells():
+    manifest = dict(MANIFEST)
+    manifest["study_area"] = {"cell_count": 175, "total_cell_count": 209}
+    manifest["excluded_cells"] = {
+        "count": 34,
+        "cells": ["lat37.000_lon1.875"],
+        "reason": "outside or only partly covered by the WorldPop raster",
+        "raster_bounds": [-2.0, 31.0, 8.9, 37.095],
+        "nodata_rule": "Cells outside the raster are excluded.",
+    }
+    report = build_reports(manifest, assessed=assessed_frame())
+    assert report.available
+
+    expected = (
+        "34 of 209 cells are excluded because the population raster does not "
+        "cover them"
+    )
+    for label, text in all_text(report).items():
+        assert expected in text, label
+
+
+def test_reports_omit_exclusion_sentence_without_excluded_cells():
+    report = build()
+    for label, text in all_text(report).items():
+        assert "are excluded because the population raster does not cover" not in text, label
+
+
 def test_report_without_results_still_carries_evidence():
     report = build_reports(
         MANIFEST,

@@ -83,6 +83,7 @@ def _population(cells: pd.DataFrame) -> pd.DataFrame:
             "pop_5km": 5_000.0 * scale,
             "pop_10km": 15_000.0 * scale,
             "pop_25km": 80_000.0 * scale,
+            "pop_status": "ok",
         }
     )
 
@@ -96,6 +97,7 @@ def _infrastructure(cells: pd.DataFrame) -> pd.DataFrame:
             "building_count": 100.0 * scale,
             "building_footprint_km2": 0.4 * scale,
             "critical_count_total": 1.0 + scale,
+            "pop_status": "ok",
         }
     )
 
@@ -707,7 +709,7 @@ def test_run_build_assembles_artifacts_with_injected_readers(build, tmp_path, mo
         build, "read_worldpop_ring_totals", lambda *_, **__: population_rings
     )
     monkeypatch.setattr(build, "read_osm_roads", lambda *_, **__: roads)
-    monkeypatch.setattr(build, "read_osm_buildings", lambda *_, **__: buildings)
+    monkeypatch.setattr(build, "read_osm_buildings", lambda *_, **__: (buildings, None))
     monkeypatch.setattr(
         build, "read_osm_pois", lambda *_, **__: (assets, critical_counts)
     )
@@ -724,7 +726,7 @@ def test_run_build_assembles_artifacts_with_injected_readers(build, tmp_path, mo
     monkeypatch.setattr(
         build,
         "summarize_vector_rings",
-        lambda frame, cells, distances, kind: pd.DataFrame(),
+        lambda frame, cells, distances, kind, **__: pd.DataFrame(),
     )
 
     out = tmp_path / "out"
@@ -864,7 +866,7 @@ def test_run_build_without_worldcover(build, tmp_path, monkeypatch):
         build, "read_worldpop_ring_totals", lambda *_, **__: population_rings
     )
     monkeypatch.setattr(build, "read_osm_roads", lambda *_, **__: roads)
-    monkeypatch.setattr(build, "read_osm_buildings", lambda *_, **__: buildings)
+    monkeypatch.setattr(build, "read_osm_buildings", lambda *_, **__: (buildings, None))
     monkeypatch.setattr(
         build, "read_osm_pois", lambda *_, **__: (assets, critical_counts)
     )
@@ -896,3 +898,425 @@ def test_run_build_without_worldcover(build, tmp_path, monkeypatch):
     assert cell_exposure["lc_tree_km2"].isna().all()
     assert cell_exposure["fuel_area_km2"].isna().all()
     assert cell_exposure["pop_cell"].notna().all()
+
+
+# ---------------------------------------------------------------------------
+# New tests: chunking, bbox, vectorised areas, --max-chunks protection
+# ---------------------------------------------------------------------------
+
+def test_osm_bbox_constant_matches_study_area(build):
+    """OSM_BBOX must fully contain the study area and follow (xmin,ymin,xmax,ymax)."""
+    xmin, ymin, xmax, ymax = build.OSM_BBOX
+    assert xmin <= build.STUDY_LON_MIN
+    assert xmax >= build.STUDY_LON_MAX
+    assert ymin <= build.STUDY_LAT_MIN
+    assert ymax >= build.STUDY_LAT_MAX
+
+
+def test_equal_area_crs_constant_is_6933(build):
+    """EQUAL_AREA_CRS must be 6933 (EPSG:6933 — EASE-Grid 2.0 World)."""
+    assert build.EQUAL_AREA_CRS == 6933
+
+
+def test_osm_chunk_features_constant_is_set(build):
+    """OSM_CHUNK_FEATURES must be a positive integer."""
+    assert isinstance(build.OSM_CHUNK_FEATURES, int)
+    assert build.OSM_CHUNK_FEATURES >= 1_000
+
+
+def test_read_vector_chunks_honours_max_chunks(build, tmp_path, monkeypatch):
+    """_read_vector_chunks must stop after max_chunks iterations."""
+    import types
+
+    calls: list[int] = []
+
+    def _fake_pyogrio():
+        mod = types.SimpleNamespace()
+
+        def read_info(path):
+            return {"features": 1_000_000, "fields": []}
+
+        def read_dataframe(path, bbox=None, columns=None, skip_features=0,
+                           max_features=None, use_arrow=False):
+            import geopandas as gpd
+            from shapely.geometry import Point
+
+            n = min(max_features or 10, max(0, 1_000_000 - skip_features))
+            calls.append(skip_features)
+            return gpd.GeoDataFrame(
+                {"geometry": [Point(0, 32)] * n},
+                crs=4326,
+            )
+
+        mod.read_info = read_info
+        mod.read_dataframe = read_dataframe
+        return mod
+
+    monkeypatch.setattr(build, "_pyogrio", _fake_pyogrio)
+
+    chunks = list(
+        build._read_vector_chunks(
+            tmp_path / "fake.shp",
+            chunk_size=100_000,
+            max_chunks=3,
+        )
+    )
+    assert len(chunks) == 3
+    assert len(calls) == 3
+    # skip_features must advance by chunk_size each call
+    assert calls[0] == 0
+    assert calls[1] == 100_000
+    assert calls[2] == 200_000
+
+
+def test_read_vector_chunks_passes_bbox(build, tmp_path, monkeypatch):
+    """_read_vector_chunks must forward OSM_BBOX to pyogrio.read_dataframe."""
+    import types
+
+    received_bbox: list = []
+
+    def _fake_pyogrio():
+        mod = types.SimpleNamespace()
+        mod.read_info = lambda path: {"features": 10, "fields": []}
+
+        def read_dataframe(path, bbox=None, **kwargs):
+            received_bbox.append(bbox)
+            import geopandas as gpd
+            from shapely.geometry import Point
+            return gpd.GeoDataFrame({"geometry": [Point(0, 32)]}, crs=4326)
+
+        mod.read_dataframe = read_dataframe
+        return mod
+
+    monkeypatch.setattr(build, "_pyogrio", _fake_pyogrio)
+
+    list(build._read_vector_chunks(tmp_path / "fake.shp", chunk_size=100, max_chunks=1))
+    assert received_bbox[0] == build.OSM_BBOX
+
+def test_vectorised_area_uses_equal_area_crs(build, monkeypatch):
+    pytest.importorskip("geopandas")
+    pytest.importorskip("shapely")
+    import geopandas as gpd
+    from shapely.geometry import box
+
+    cells = _cells()
+    lat0, lon0 = float(cells.iloc[0]["lat_cell"]), float(cells.iloc[0]["lon_cell"])
+    # ~1 km x 1 km square at the first cell centre
+    d = 0.0045
+    geom = box(lon0 - d, lat0 - d, lon0 + d, lat0 + d)
+
+    def _fake_pyogrio():
+        import types
+        mod = types.SimpleNamespace()
+        mod.read_info = lambda path: {"features": 1, "fields": []}
+        mod.read_dataframe = lambda path, **kw: gpd.GeoDataFrame(
+            {"geometry": [geom]}, crs=4326)
+        return mod
+
+    monkeypatch.setattr(build, "_pyogrio", _fake_pyogrio)
+    df, _ = build.read_osm_buildings(Path("fake.shp"), cells, chunk_size=10, max_chunks=1)
+    area = float(df["building_footprint_km2"].sum())
+    assert 0.5 < area < 1.5   # about 1 km2, not square degrees
+
+
+
+def test_max_chunks_protection_refuses_canonical_dir(build, tmp_path, monkeypatch):
+    """run_build with max_chunks must refuse to write to the canonical impact dir."""
+    import impact.config as _cfg
+
+    canonical = Path(_cfg.IMPACT_DATA_DIR).resolve()
+    # We only test the guard; no real sources needed
+    with pytest.raises(build.BuildError, match="--max-chunks"):
+        build.run_build(
+            raw_dir=tmp_path / "raw",
+            out_dir=canonical,
+            checksums_path=tmp_path / "c.json",
+            max_chunks=2,
+        )
+
+
+def test_max_chunks_protection_allows_alternate_dir(build, tmp_path, monkeypatch):
+    """run_build with max_chunks must NOT raise if out_dir differs from canonical."""
+    # The build will fail at resolve_required_sources (no files), not at the guard.
+    with pytest.raises((build.BuildError, build.MissingSourceError)) as exc_info:
+        build.run_build(
+            raw_dir=tmp_path / "raw",
+            out_dir=tmp_path / "output",   # not the canonical dir
+            checksums_path=tmp_path / "c.json",
+            max_chunks=2,
+        )
+    # Must NOT be the max-chunks guard error
+    assert "--max-chunks" not in str(exc_info.value)
+
+
+def test_split_excluded_cells_drops_pop_status_and_records_reason(build):
+    frame = pd.DataFrame(
+        {
+            "cell_id": ["a", "b", "c"],
+            "lat_cell": [32.0, 32.0, 32.5],
+            "lon_cell": [-1.875, -1.25, -1.875],
+            "pop_cell": [1.0, 2.0, 3.0],
+            "pop_status": ["ok", "partial_coverage", "not_covered"],
+        }
+    )
+    kept, excluded = build.split_excluded_cells(frame)
+
+    assert list(kept["cell_id"]) == ["a"]
+    assert "pop_status" not in kept.columns
+    assert set(excluded["cell_id"]) == {"b", "c"}
+    assert list(excluded.columns) == [
+        "cell_id",
+        "lat_cell",
+        "lon_cell",
+        "pop_status",
+        "reason",
+    ]
+    assert set(excluded["reason"]) == {build.EXCLUDED_CELLS_REASON}
+
+
+def test_split_excluded_cells_requires_pop_status(build):
+    with pytest.raises(build.BuildError, match="pop_status"):
+        build.split_excluded_cells(
+            pd.DataFrame({"cell_id": ["a"], "pop_cell": [1.0]})
+        )
+
+
+def test_filter_cells_and_coordinates_remove_only_excluded_rows(build):
+    cells = _cells()
+    excluded = pd.DataFrame(
+        {
+            "cell_id": [cells.loc[1, "cell_id"]],
+            "lat_cell": [cells.loc[1, "lat_cell"]],
+            "lon_cell": [cells.loc[1, "lon_cell"]],
+            "pop_status": ["not_covered"],
+            "reason": [build.EXCLUDED_CELLS_REASON],
+        }
+    )
+    ids = build.excluded_cell_ids(excluded)
+
+    by_id = build.filter_cells(_population(cells), ids)
+    assert len(by_id) == len(cells) - 1
+    assert cells.loc[1, "cell_id"] not in set(by_id["cell_id"])
+
+    admin = cells[["lat_cell", "lon_cell"]].copy()
+    by_coords = build.filter_cells_by_coordinates(admin, excluded)
+    assert len(by_coords) == len(cells) - 1
+    assert not (
+        (by_coords["lat_cell"] == cells.loc[1, "lat_cell"])
+        & (by_coords["lon_cell"] == cells.loc[1, "lon_cell"])
+    ).any()
+
+    assert build.filter_cells(None, ids) is None
+    assert build.excluded_cell_ids(None) == set()
+
+
+def test_run_build_excludes_cells_outside_worldpop_coverage(
+    build, tmp_path, monkeypatch
+):
+    """Uncovered/partly covered cells leave every artifact and the thresholds."""
+    raw = tmp_path / "raw"
+    osm = raw / build.OSM_FOLDER
+    osm.mkdir(parents=True)
+    for name in build.expected_worldcover_files():
+        (raw / name).write_bytes(name.encode("utf-8"))
+    (raw / build.WORLDPOP_FILENAME).write_bytes(b"population")
+    for name in build.OSM_REQUIRED:
+        (osm / name).write_bytes(name.encode("utf-8"))
+
+    checksums_path = raw / build.CHECKSUM_FILENAME
+    sources = build.resolve_required_sources(raw)
+    build.write_checksums(raw, sources.all_files(), checksums_path)
+
+    cells = build.cells_from_panel(
+        pd.DataFrame(
+            {
+                "lat_cell": [32.0, 32.0, 32.5],
+                "lon_cell": [-1.875, -1.25, -1.875],
+            }
+        )
+    )
+    # cells_from_panel sorts by latitude then longitude.
+    kept_id = cells.loc[0, "cell_id"]
+    excluded_ids = set(cells.loc[1:, "cell_id"])
+    statuses = ["ok", "partial_coverage", "not_covered"]
+
+    population = cells.copy()
+    population["pop_cell"] = [1_000.0, 500.0, np.nan]
+    population["pop_5km"] = [5_000.0, 2_000.0, np.nan]
+    population["pop_10km"] = [15_000.0, 6_000.0, np.nan]
+    population["pop_25km"] = [80_000.0, 20_000.0, np.nan]
+    population["pop_status"] = statuses
+    population.attrs["raster_bounds"] = [-2.0, 31.0, 1.0, 37.095]
+
+    ring_rows = []
+    for cell in cells.itertuples():
+        for radius in config.RING_DISTANCES_KM:
+            ring_rows.append(
+                {
+                    "lat_cell": cell.lat_cell,
+                    "lon_cell": cell.lon_cell,
+                    "ring_km": float(radius),
+                    "population": 1_000.0 * radius,
+                }
+            )
+    population_rings = pd.DataFrame(ring_rows)
+
+    roads = _infrastructure(cells)[["cell_id", "road_km_total"]].copy()
+    for column in build.ROAD_CLASS_COLUMNS.values():
+        roads[column] = 1.0
+    buildings = _infrastructure(cells)[
+        ["cell_id", "building_count", "building_footprint_km2"]
+    ].copy()
+    critical_counts = _infrastructure(cells)[["cell_id", "critical_count_total"]].copy()
+    for column in build.CRITICAL_CLASS_COLUMNS.values():
+        critical_counts[column] = 1.0
+
+    settlements = pd.DataFrame(
+        {
+            "lat_cell": cells["lat_cell"].to_numpy(),
+            "lon_cell": cells["lon_cell"].to_numpy(),
+            "settlement_name": ["A", "B", "C"],
+            "population": [100.0, 200.0, 300.0],
+            "distance_km": [0.0, 1.0, 2.0],
+            "cell_id": cells["cell_id"].to_numpy(),
+        }
+    )
+    settlement_counts = pd.DataFrame(
+        {
+            "cell_id": cells["cell_id"].to_numpy(),
+            "settlement_count": [1.0, 1.0, 1.0],
+            "settlement_population": [100.0, 200.0, 300.0],
+        }
+    )
+    assets = pd.DataFrame(
+        {
+            "lat_cell": cells["lat_cell"].to_numpy(),
+            "lon_cell": cells["lon_cell"].to_numpy(),
+            "category": ["hospital", "school", "power"],
+            "asset_name": ["Clinic A", "School B", "Plant C"],
+            "cell_id": cells["cell_id"].to_numpy(),
+        }
+    )
+
+    monkeypatch.setattr(build, "cells_for_build", lambda **_: cells.copy())
+    monkeypatch.setattr(
+        build, "read_worldcover_areas", lambda *_, **__: _landcover(cells)
+    )
+    monkeypatch.setattr(
+        build, "read_worldpop_cell_totals", lambda *_, **__: population
+    )
+    monkeypatch.setattr(
+        build, "read_worldpop_ring_totals", lambda *_, **__: population_rings
+    )
+    monkeypatch.setattr(build, "read_osm_roads", lambda *_, **__: roads)
+    monkeypatch.setattr(build, "read_osm_buildings", lambda *_, **__: (buildings, None))
+    monkeypatch.setattr(
+        build, "read_osm_pois", lambda *_, **__: (assets, critical_counts)
+    )
+    monkeypatch.setattr(
+        build,
+        "read_osm_settlements",
+        lambda *_, **__: (settlements, settlement_counts),
+    )
+    monkeypatch.setattr(
+        build,
+        "_read_vector",
+        lambda *_, **__: pd.DataFrame({"fclass": pd.Series([], dtype=object)}),
+    )
+    monkeypatch.setattr(
+        build,
+        "summarize_vector_rings",
+        lambda frame, cells, distances, kind, **__: pd.DataFrame(),
+    )
+
+    captured: dict[str, int] = {}
+    real_freeze = build.freeze_tier_thresholds
+
+    def _spy(values, quantiles=(0.20, 0.40, 0.60, 0.80)):
+        captured["count"] = len(list(values))
+        return real_freeze(values, quantiles)
+
+    monkeypatch.setattr(build, "freeze_tier_thresholds", _spy)
+
+    out = tmp_path / "out"
+    manifest = build.run_build(
+        raw_dir=raw,
+        out_dir=out,
+        checksums_path=checksums_path,
+        with_rings=True,
+    )
+
+    excluded_info = manifest["excluded_cells"]
+    assert excluded_info["count"] == 2
+    assert set(excluded_info["cells"]) == excluded_ids
+    assert excluded_info["reason"] == build.EXCLUDED_CELLS_REASON
+    assert excluded_info["raster_bounds"] == [-2.0, 31.0, 1.0, 37.095]
+    assert excluded_info["nodata_rule"] == build.WORLDPOP_NODATA_RULE
+
+    study_area = manifest["study_area"]
+    assert study_area["cell_count"] == 1
+    assert study_area["total_cell_count"] == 3
+    assert study_area["excluded_cell_count"] == 2
+
+    # Thresholds are frozen from the one remaining cell only.
+    assert captured["count"] == 1
+
+    excluded_frame = pd.read_parquet(out / build.EXCLUDED_CELLS_FILENAME)
+    assert len(excluded_frame) == 2
+    assert set(excluded_frame["cell_id"]) == excluded_ids
+    assert set(excluded_frame["pop_status"]) == {
+        "partial_coverage",
+        "not_covered",
+    }
+    assert set(excluded_frame["reason"]) == {build.EXCLUDED_CELLS_REASON}
+
+    cell_exposure = pd.read_parquet(out / config.CELL_EXPOSURE_PATH.name)
+    assert len(cell_exposure) == 1
+    assert cell_exposure.loc[0, "cell_id"] == kept_id
+    assert "pop_status" not in cell_exposure.columns
+
+    rings = pd.read_parquet(out / config.RING_EXPOSURE_PATH.name)
+    assert len(rings) == len(config.RING_DISTANCES_KM)
+    assert set(rings["cell_id"]) == {kept_id}
+
+    settlement_artifact = pd.read_parquet(out / config.SETTLEMENTS_PATH.name)
+    assert len(settlement_artifact) == 1
+    assert list(settlement_artifact["settlement_name"]) == ["A"]
+
+    infrastructure_artifact = pd.read_parquet(
+        out / config.INFRASTRUCTURE_PATH.name
+    )
+    assert len(infrastructure_artifact) == 1
+    assert list(infrastructure_artifact["asset_name"]) == ["Clinic A"]
+
+
+def test_read_osm_roads_accumulates_chunks(build, monkeypatch, tmp_path):
+    """read_osm_roads must accumulate counts across multiple chunks."""
+    import types
+    from shapely.geometry import LineString
+    import geopandas as gpd
+
+    cells = _cells()
+    # Two chunks of 1 road each landing in the first cell
+    chunk_calls = [0]
+
+    def _fake_pyogrio():
+        mod = types.SimpleNamespace()
+        mod.read_info = lambda path: {"features": 2, "fields": ["fclass"]}
+
+        def read_dataframe(path, skip_features=0, max_features=None, **kwargs):
+            # Each chunk: one road near cell centre (32.0, -1.875)
+            line = LineString([(-1.876, 32.0), (-1.874, 32.0)])  # ~200 m
+            return gpd.GeoDataFrame({"fclass": ["primary"], "geometry": [line]}, crs=4326)
+
+        mod.read_dataframe = read_dataframe
+        return mod
+
+    monkeypatch.setattr(build, "_pyogrio", _fake_pyogrio)
+
+    result = build.read_osm_roads(
+        tmp_path / "roads.shp", cells, chunk_size=1, max_chunks=2
+    )
+    # Both chunks should have been accumulated into road_km_primary
+    assert result["road_km_primary"].sum() > 0.0, "chunks not accumulated"
+    assert result["road_km_total"].sum() > 0.0

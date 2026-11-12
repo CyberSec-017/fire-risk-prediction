@@ -248,6 +248,14 @@ The script fails loudly, before writing any artifact, if a required file is
 missing, a checksum is absent, or a checksum does not match. It refuses to
 substitute zeros for missing data.
 
+Cells that lie outside the WorldPop raster, or only partly inside it, are not
+scored: they are written to `data/impact/excluded_cells.parquet` and listed
+under `excluded_cells` in `manifest.json`. They are removed from the exposure,
+ring, settlement, infrastructure and administrative artifacts, and the IEI tier
+thresholds are computed from the remaining cells only. The page and reports
+state how many cells were excluded and why; excluded cells are never treated as
+zero population.
+
 ---
 
 ## 6. Validate the derived artifacts
@@ -272,8 +280,11 @@ exits non-zero if any **error** is found. Warnings do not fail the run.
 - **`BuildDependencyError`** — install the build-only stack:
   `python -m pip install -r requirements-impact.txt`.
 - **WorldPop all-NaN cells** — the constrained raster only covers mapped
-  settled areas. Cells with no valid pixels remain explicit missing values;
-  they are never filled with zero.
+  settled areas. A cell fully inside the raster with no valid pixels is a known
+  zero population. A cell outside or only partly covered by the raster (the
+  raster's north edge is ~37.095 °N, so cells centred at 37.0–37.5 °N are
+  affected) is excluded from the exposure table and reported in
+  `excluded_cells.parquet` and `manifest.json`; it is never filled with zero.
 - **Large runtime** — WorldCover is 10 m data. The build reads it block by
   block, but expect tens of minutes on a laptop. Use `--block-size` to trade
   memory for speed.

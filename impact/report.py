@@ -44,6 +44,40 @@ REQUIRED_DISCLAIMER = (
 
 BURNED_AREA_NOT_AVAILABLE = "Not available (phase 2)"
 
+EXCLUDED_CELLS_SENTENCE = (
+    "cells are excluded because the population raster does not cover them"
+)
+
+
+def excluded_cells_message(manifest: Mapping[str, Any] | None) -> str | None:
+    """Return the population-coverage exclusion sentence, when applicable."""
+    if not isinstance(manifest, Mapping):
+        return None
+    excluded = manifest.get("excluded_cells")
+    if not isinstance(excluded, Mapping):
+        return None
+    try:
+        count = int(excluded.get("count") or 0)
+    except (TypeError, ValueError):
+        return None
+    if count <= 0:
+        return None
+
+    total: int | None = None
+    study_area = manifest.get("study_area")
+    if isinstance(study_area, Mapping):
+        for key in ("total_cell_count", "cell_count"):
+            try:
+                candidate = int(study_area.get(key))
+            except (TypeError, ValueError):
+                continue
+            if candidate > 0:
+                total = candidate
+                break
+    if total is None:
+        total = count
+    return f"{count} of {total} {EXCLUDED_CELLS_SENTENCE}"
+
 # Stable, report-friendly column order.  Missing columns are simply omitted.
 REPORT_COLUMNS = (
     "lat_cell",
@@ -219,6 +253,7 @@ def _metadata(
         "sources": source_payload(),
         "severity_method": formula_text(fuel_missing=fuel_missing),
         "fuel_missing": fuel_missing,
+        "excluded_cells": excluded_cells_message(manifest),
         "severity_note": (
             "Severity was computed without the fuel component (WorldCover not ingested; "
             "weights renormalized to population 0.35/0.65 and infrastructure 0.30/0.65)."
@@ -285,6 +320,8 @@ def _metadata_rows(metadata: Mapping[str, Any]) -> list[tuple[str, str]]:
         ("Manifest schema", _text(metadata.get("manifest_schema_version"))),
         ("Confirmed burned area", _text(metadata.get("confirmed_burned_area"))),
     ]
+    if metadata.get("excluded_cells"):
+        rows.append(("Excluded cells", _text(metadata.get("excluded_cells"))))
     if metadata.get("fuel_missing"):
         rows.append(
             (
@@ -546,6 +583,7 @@ __all__ = [
     "REPORT_COLUMNS",
     "ReportResult",
     "compute_manifest_checksum",
+    "excluded_cells_message",
     "evidence_layer_payload",
     "source_payload",
     "build_html_report",

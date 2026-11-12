@@ -61,7 +61,11 @@ from impact.data import (  # noqa: E402
 )
 from impact.exposure import merge_risk_and_exposure, prepare_exposure  # noqa: E402
 from impact.maps import exposure_choropleth, risk_exposure_map  # noqa: E402
-from impact.report import BURNED_AREA_NOT_AVAILABLE, build_reports  # noqa: E402
+from impact.report import (  # noqa: E402
+    BURNED_AREA_NOT_AVAILABLE,
+    build_reports,
+    excluded_cells_message,
+)
 from impact.severity import (  # noqa: E402
     NOT_APPLICABLE,
     TIER_LABELS,
@@ -163,6 +167,16 @@ model_ready = (
 )
 
 data_ready = exposure_data.available and manifest.available
+
+_excluded_message = excluded_cells_message(
+    manifest.manifest if manifest.available else None
+)
+if _excluded_message:
+    render_callout(
+        title="Population raster coverage",
+        message=_excluded_message,
+        variant="info",
+    )
 
 # ---------------------------------------------------------------------------
 # Assessment date

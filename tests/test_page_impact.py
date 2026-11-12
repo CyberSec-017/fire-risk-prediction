@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import sys
 from pathlib import Path
 
@@ -158,3 +159,32 @@ def test_page_environment_tab_and_severity_without_fuel(tmp_path):
 
     # Overview and Report state severity was computed without fuel component
     assert "Severity was computed without the fuel component" in body
+
+
+def test_page_reports_excluded_population_raster_cells(tmp_path):
+    import shutil
+
+    for item in FIXTURE.iterdir():
+        if item.is_file():
+            shutil.copy(item, tmp_path / item.name)
+
+    manifest_path = tmp_path / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["study_area"] = {"cell_count": 175, "total_cell_count": 209}
+    manifest["excluded_cells"] = {
+        "count": 34,
+        "cells": ["lat37.000_lon1.875"],
+        "reason": "outside or only partly covered by the WorldPop raster",
+        "raster_bounds": [-2.0, 31.0, 8.9, 37.095],
+        "nodata_rule": "Cells outside the raster are excluded.",
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    app = run_page(tmp_path)
+    assert not app.exception
+    body = rendered_markdown(app)
+
+    assert (
+        "34 of 209 cells are excluded because the population raster does not "
+        "cover them"
+    ) in body
