@@ -359,3 +359,28 @@ def test_landing_page_compares_scenarios():
     scenario_tables = [table for table in tables if "Scenario" in list(table.columns)]
     assert scenario_tables
     assert scenario_tables[0]["Scenario"].tolist() == list(PRESET_ORDER)
+
+
+def test_result_stays_stable_and_flags_changed_inputs():
+    import re
+
+    app = run_page()
+    next(b for b in app.button if "Predict fire risk" in b.label).click().run()
+    assert not app.exception, app.exception
+
+    rendered = "\n".join(item.value for item in app.markdown)
+    match = re.search(r'class="fwx-prob"[^>]*>([\d.]+)%', rendered)
+    assert match, "probability headline not found"
+    original = match.group(1)
+
+    # Edit one weather input without pressing Predict again.
+    app.number_input[2].set_value(45.0).run()
+    assert not app.exception, app.exception
+
+    rendered = "\n".join(item.value for item in app.markdown)
+    warnings = " ".join(item.value for item in app.warning)
+    assert "Inputs changed since this prediction" in warnings
+    assert "Predict fire risk" in warnings
+    # The displayed score must not silently drift with the edited input.
+    match = re.search(r'class="fwx-prob"[^>]*>([\d.]+)%', rendered)
+    assert match and match.group(1) == original
