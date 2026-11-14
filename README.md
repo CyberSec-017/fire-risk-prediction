@@ -567,6 +567,7 @@ fire-risk-prediction/
 │
 ├── requirements.txt
 ├── requirements-impact.txt
+├── requirements-report.txt
 ├── DATA_DOWNLOAD.md
 └── README.md
 ```
@@ -623,7 +624,7 @@ python -m pip install -r requirements-impact.txt
 For the PDF report generator:
 
 ```bash
-python -m pip install reportlab
+python -m pip install -r requirements-report.txt
 ```
 
 ---
