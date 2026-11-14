@@ -1,0 +1,267 @@
+{
+  "generated_at": "2026-11-14T07:57:28+00:00",
+  "project": "FIREWATCH AI \u2014 Wildfire Risk Prediction",
+  "study_area": "Northern Algeria (32.0\u201337.5\u00b0N, -2.0\u20139.0\u00b0E)",
+  "model": {
+    "version": "0.1.0",
+    "path": "C:\\Users\\DELL\\Documents\\Projet par d\u00e9faut\\models\\fire_model.joblib",
+    "n_features": 20,
+    "features": [
+      "lat_cell",
+      "lon_cell",
+      "T2M",
+      "T2M_MAX",
+      "RH2M",
+      "WS2M",
+      "PRECTOTCORR",
+      "GWETROOT",
+      "rain_7d",
+      "tmax_7d",
+      "rhmin_7d",
+      "rain_14d",
+      "tmax_14d",
+      "rhmin_14d",
+      "rain_30d",
+      "tmax_30d",
+      "rhmin_30d",
+      "dry_days",
+      "doy_sin",
+      "doy_cos"
+    ],
+    "risk_bins": [
+      0,
+      0.005,
+      0.02,
+      0.06,
+      1.0
+    ],
+    "risk_labels": [
+      "LOW",
+      "MODERATE",
+      "HIGH",
+      "VERY HIGH"
+    ],
+    "recorded_metrics": {
+      "pr_auc": 0.15817696977890822,
+      "base_rate": 0.02370573127872398,
+      "brier": 0.022343928073831346,
+      "brier_skill": 0.034559690311293134,
+      "top_decile_fire_share": 0.5256593014967926,
+      "train_rows": 236736,
+      "val_rows": 78840,
+      "test_rows": 236736
+    }
+  },
+  "split": {
+    "train_rows": 215897,
+    "val_rows": 75658,
+    "test_rows": 228437,
+    "val_year": 2021,
+    "test_years": [
+      2022,
+      2023,
+      2024
+    ],
+    "horizon_days": 3
+  },
+  "dataset": {
+    "rows": 521246,
+    "cells": 209,
+    "date_min": "2018-03-02",
+    "date_max": "2024-12-28",
+    "positive_rate": 0.05013947349236253,
+    "positive_cell_days": 26135
+  },
+  "metrics": {
+    "pr_auc": 0.24413018969734226,
+    "pr_auc_raw": 0.2529022761532257,
+    "roc_auc": 0.881249225692585,
+    "base_rate": 0.04322854879025727,
+    "brier": 0.03617751569854039,
+    "brier_skill": 0.12529848981115865,
+    "ece": 0.005061660948683507,
+    "calibration_slope": 0.880811172899815,
+    "calibration_intercept": -0.34099935161066586,
+    "top_decile_fire_share": 0.5050126582278481,
+    "climatology_pr_auc": 0.20655479983735886,
+    "climatology_brier": 0.041719429928166754,
+    "climatology_calibrated_brier": 0.037441182367012826,
+    "brier_gain_vs_climatology": 0.03375071481678882,
+    "precision_at_0_5": 0.513681592039801,
+    "recall_at_0_5": 0.041822784810126586,
+    "f1_at_0_5": 0.07734806629834254,
+    "best_f1": 0.3076068124611814,
+    "best_f1_threshold": 0.155
+  },
+  "confusion_matrix": {
+    "tn": 218171,
+    "fp": 391,
+    "fn": 9462,
+    "tp": 413
+  },
+  "risk_bands": [
+    {
+      "band": "LOW",
+      "cells": 107903,
+      "mean_score": 0.0007630816535781655,
+      "observed_rate": 0.001158447865212274,
+      "positives": 125,
+      "share_of_all_fires": 0.012658227848101266
+    },
+    {
+      "band": "MODERATE",
+      "cells": 33587,
+      "mean_score": 0.010874020785579773,
+      "observed_rate": 0.012207103939024027,
+      "positives": 410,
+      "share_of_all_fires": 0.04151898734177215
+    },
+    {
+      "band": "HIGH",
+      "cells": 36300,
+      "mean_score": 0.04146067542616048,
+      "observed_rate": 0.040661157024793386,
+      "positives": 1476,
+      "share_of_all_fires": 0.14946835443037976
+    },
+    {
+      "band": "VERY HIGH",
+      "cells": 50647,
+      "mean_score": 0.1747539741688011,
+      "observed_rate": 0.15527079590104054,
+      "positives": 7864,
+      "share_of_all_fires": 0.7963544303797468
+    }
+  ],
+  "yearly": [
+    {
+      "year": 2022,
+      "rows": 76285,
+      "base_rate": 0.047702693845447994,
+      "pr_auc_model": 0.29598808751876715,
+      "pr_auc_climatology": 0.25401973834133956,
+      "brier": 0.037912311360869,
+      "top_decile_share": 0.5454795273426766
+    },
+    {
+      "year": 2023,
+      "rows": 76285,
+      "base_rate": 0.047204561840466674,
+      "pr_auc_model": 0.2606649405973301,
+      "pr_auc_climatology": 0.21749503388792818,
+      "brier": 0.038829412633550026,
+      "top_decile_share": 0.5006942515967787
+    },
+    {
+      "year": 2024,
+      "rows": 75867,
+      "base_rate": 0.034731833339923815,
+      "pr_auc_model": 0.17320483744013723,
+      "pr_auc_climatology": 0.15103558409347603,
+      "brier": 0.031766653995982636,
+      "top_decile_share": 0.44364326375711577
+    }
+  ],
+  "permutation_importance": [
+    {
+      "feature": "lat_cell",
+      "importance_mean": 0.009182130412246083,
+      "importance_std": 0.00013012152908788732
+    },
+    {
+      "feature": "lon_cell",
+      "importance_mean": 0.001899568776434812,
+      "importance_std": 0.00031653287149014146
+    },
+    {
+      "feature": "tmax_30d",
+      "importance_mean": 0.0010645003603344156,
+      "importance_std": 0.00022290563899145805
+    },
+    {
+      "feature": "GWETROOT",
+      "importance_mean": 0.0010089851218140118,
+      "importance_std": 8.18375244407196e-05
+    },
+    {
+      "feature": "doy_cos",
+      "importance_mean": 0.0003166470650094594,
+      "importance_std": 0.0001056166970670246
+    },
+    {
+      "feature": "rhmin_30d",
+      "importance_mean": 0.00023721600089283978,
+      "importance_std": 5.1576106560197165e-05
+    },
+    {
+      "feature": "PRECTOTCORR",
+      "importance_mean": 0.00019689044625567873,
+      "importance_std": 7.955036455427045e-05
+    },
+    {
+      "feature": "rhmin_14d",
+      "importance_mean": 0.0001276469797829282,
+      "importance_std": 4.979755536084286e-05
+    },
+    {
+      "feature": "rain_14d",
+      "importance_mean": 0.00011222051110797392,
+      "importance_std": 6.678035276828508e-05
+    },
+    {
+      "feature": "rain_7d",
+      "importance_mean": 7.00282111500856e-05,
+      "importance_std": 5.417057148743497e-05
+    },
+    {
+      "feature": "doy_sin",
+      "importance_mean": 4.936868667322625e-05,
+      "importance_std": 3.681733051619566e-05
+    },
+    {
+      "feature": "RH2M",
+      "importance_mean": 3.72401168807629e-05,
+      "importance_std": 2.023005848267133e-05
+    },
+    {
+      "feature": "T2M_MAX",
+      "importance_mean": 1.5252158150571663e-05,
+      "importance_std": 1.4596709960141455e-05
+    },
+    {
+      "feature": "tmax_14d",
+      "importance_mean": 1.3974475039986445e-05,
+      "importance_std": 5.643690985002432e-05
+    },
+    {
+      "feature": "T2M",
+      "importance_mean": 1.3878684000110756e-05,
+      "importance_std": 2.4947118252924966e-05
+    },
+    {
+      "feature": "WS2M",
+      "importance_mean": 2.2836166807075713e-08,
+      "importance_std": 4.506171855907253e-05
+    },
+    {
+      "feature": "tmax_7d",
+      "importance_mean": -1.266251075828645e-05,
+      "importance_std": 7.000302107379162e-05
+    },
+    {
+      "feature": "rain_30d",
+      "importance_mean": -2.9982538764493822e-05,
+      "importance_std": 2.19889436622825e-05
+    },
+    {
+      "feature": "rhmin_7d",
+      "importance_mean": -3.6439718195340386e-05,
+      "importance_std": 3.1321071451479655e-05
+    },
+    {
+      "feature": "dry_days",
+      "importance_mean": -8.112806505588636e-05,
+      "importance_std": 4.764880555684809e-05
+    }
+  ]
+}
