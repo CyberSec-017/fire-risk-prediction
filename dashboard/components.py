@@ -209,6 +209,68 @@ def inject_global_css() -> None:
             border-top: 1px solid {COLORS["border_light"]} !important;
             margin: 24px 0 !important;
         }}
+
+        /* ── Keyboard Accessibility ── */
+        a:focus-visible,
+        button:focus-visible,
+        summary:focus-visible,
+        [role="tab"]:focus-visible,
+        input:focus-visible,
+        textarea:focus-visible,
+        select:focus-visible,
+        [tabindex]:focus-visible {{
+            outline: 2px solid {COLORS["brand_primary"]} !important;
+            outline-offset: 2px !important;
+            border-radius: 4px;
+        }}
+
+        /* The dark sidebar needs a light ring to stay visible. */
+        section[data-testid="stSidebar"] a:focus-visible,
+        section[data-testid="stSidebar"] button:focus-visible,
+        section[data-testid="stSidebar"] [tabindex]:focus-visible {{
+            outline-color: #34D399 !important;
+        }}
+
+        /* Keep the focus ring on the plotly chart toolbar and dataframes. */
+        .stDataFrame [tabindex]:focus-visible,
+        .js-plotly-plot [tabindex]:focus-visible {{
+            outline: 2px solid {COLORS["brand_primary"]} !important;
+            outline-offset: 1px !important;
+        }}
+
+        /* Screen-reader-only helper for supplemental context. */
+        .fwx-sr-only {{
+            position: absolute !important;
+            width: 1px !important;
+            height: 1px !important;
+            padding: 0 !important;
+            margin: -1px !important;
+            overflow: hidden !important;
+            clip: rect(0, 0, 0, 0) !important;
+            white-space: nowrap !important;
+            border: 0 !important;
+        }}
+
+        /* Disabled controls must stay legible, not just faded. */
+        .stButton > button:disabled,
+        .stDownloadButton > button:disabled {{
+            opacity: 0.55 !important;
+            cursor: not-allowed !important;
+            background-color: {COLORS["surface_subtle"]} !important;
+            color: {COLORS["text_muted"]} !important;
+            border-color: {COLORS["border_light"]} !important;
+            box-shadow: none !important;
+        }}
+
+        /* Respect the user's motion preference. */
+        @media (prefers-reduced-motion: reduce) {{
+            *, *::before, *::after {{
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+                scroll-behavior: auto !important;
+            }}
+        }}
         </style>
         """,
         unsafe_allow_html=True,
@@ -477,10 +539,11 @@ def render_callout(
         },
     }
     cfg = palette.get(variant, palette["info"])
+    role = "alert" if variant in {"warning", "danger"} else "status"
 
     st.markdown(
         f"""
-        <div style="
+        <div role="{role}" style="
             background-color: {cfg['bg']};
             border: 1px solid {cfg['border']};
             border-left: 4px solid {cfg['text']};
@@ -504,7 +567,7 @@ def render_data_unavailable(dataset_name: str = "dataset") -> None:
     """Render a clean missing data warning state."""
     st.markdown(
         f"""
-        <div style="
+        <div role="status" style="
             background-color: {COLORS['surface_white']};
             border: 1px solid {COLORS['border_light']};
             border-radius: 8px;
