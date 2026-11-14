@@ -13,6 +13,7 @@ The heavy lifting lives in ``dashboard.predictor`` (pure, tested) and
 from __future__ import annotations
 
 import datetime
+import json
 from typing import Any
 
 import numpy as np
@@ -61,6 +62,7 @@ from dashboard.predictor import (
     feature_sensitivity,
     format_pp,
     guidance_for,
+    prediction_payload,
     read_share_params,
     risk_narrative,
     score_conditions,
@@ -931,7 +933,9 @@ with st.container(border=True):
                 unsafe_allow_html=True,
             )
 
-            with st.expander("Share or bookmark this prediction", expanded=False):
+            with st.expander(
+                "Share, bookmark or export this prediction", expanded=False
+            ):
                 st.caption(
                     "Append this query string to the app URL to reopen the page with the same "
                     "location, date and scenario. `run=1` re-scores automatically on arrival."
@@ -947,6 +951,33 @@ with st.container(border=True):
                         ),
                     ),
                     language="text",
+                )
+                st.caption(
+                    "The JSON record below captures the inputs, the score and the drivers "
+                    "so a prediction can be archived or cited in a report."
+                )
+                payload = prediction_payload(
+                    prediction=prediction,
+                    features=scoring_features,
+                    lat=snapshot["lat"],
+                    lon=snapshot["lon"],
+                    when=snapshot["date"],
+                    scenario=snapshot["scenario"],
+                    model_version=model_version,
+                    base_rate=base_rate,
+                    using_live=snapshot["using_live"],
+                    sensitivity=drivers,
+                )
+                st.download_button(
+                    "⬇️ Download prediction as JSON",
+                    data=json.dumps(payload, indent=2, ensure_ascii=False),
+                    file_name=(
+                        "firewatch_prediction_"
+                        f"{snapshot['date']:%Y-%m-%d}_"
+                        f"{snapshot['lat']:.2f}_{snapshot['lon']:.2f}.json"
+                    ),
+                    mime="application/json",
+                    key="download_prediction_json",
                 )
 
 # ---------------------------------------------------------------------------
