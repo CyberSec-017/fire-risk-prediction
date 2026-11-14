@@ -78,6 +78,14 @@ from dashboard.predictor import DISPLAY_LABELS  # noqa: E402
 # ---------------------------------------------------------------------------
 # Console helpers
 # ---------------------------------------------------------------------------
+def _project_path(path: Path) -> str:
+    """Return a repository-relative path so summaries stay portable."""
+    try:
+        return path.resolve().relative_to(ROOT).as_posix()
+    except ValueError:
+        return path.name
+
+
 def rule(title: str = "", width: int = 78) -> None:
     if title:
         print(f"\n{'─' * width}\n{title}\n{'─' * width}")
@@ -703,7 +711,7 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         "study_area": "Northern Algeria (32.0–37.5°N, -2.0–9.0°E)",
         "model": {
             "version": card.get("model_version"),
-            "path": str(bundle.model_path),
+            "path": _project_path(bundle.model_path),
             "n_features": len(features),
             "features": features,
             "risk_bins": card["risk_bins"],
