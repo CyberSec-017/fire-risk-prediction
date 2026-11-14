@@ -338,6 +338,19 @@ interpretation, a one-feature-at-a-time sensitivity chart explaining the score,
 and actionable guidance. Model metrics and data provenance stay folded in an
 expander so the prediction remains the focus.
 
+Four supporting features keep the page useful beyond a single score:
+
+- **Scenario comparison.** A collapsed table and bar chart score all four
+  weather presets on the selected grid cell and date, showing the model's
+  response surface next to the historical base rate.
+- **Stable results.** The result panel renders from a snapshot taken when
+  *Predict* is pressed. Editing an input afterwards raises a warning naming the
+  changed drivers instead of silently changing the displayed probability.
+- **Shareable links.** Location, date and scenario are written to the URL as
+  `?lat=&lon=&date=&scenario=&run=1`; a link with `run=1` re-scores on arrival.
+- **JSON export.** The same panel offers a downloadable record of the model
+  version, grid cell, inputs, score, band and drivers for reports or archiving.
+
 ### 1. Overview
 
 Provides an overview of the platform, its data, and the available analytical modules.
@@ -381,6 +394,10 @@ in `tests/test_predictor.py`.
 | `condition_summary` | Human-readable summary of the entered conditions |
 | `guidance_for` / `risk_narrative` | Non-alarmist, band-specific guidance |
 | `baseline_comparison` | Compares the score with the climatological base rate |
+| `compare_presets` | Scores all four presets on one grid cell and date |
+| `changed_features` / `feature_label` | Detects edited inputs against the snapshot |
+| `share_query` / `share_url` / `read_share_params` | Builds and parses shareable URLs |
+| `prediction_payload` | JSON-serialisable record of one prediction |
 
 Design choices:
 
@@ -392,6 +409,35 @@ Design choices:
   perturbation, not a claimed causal attribution.
 - **Uncertainty is stated.** The score is a probability of a fire detection in
   the next 3 days for a coarse grid cell, not a forecast of a specific fire.
+- **Displayed results do not drift.** A prediction is immutable until the user
+  asks for a new one, and edited inputs are flagged explicitly.
+- **State is linkable.** A prediction can be reproduced from its URL, which
+  makes results easy to discuss, bookmark or cite.
+
+### Sharing a prediction
+
+A prediction can be reopened from a URL:
+
+```text
+http://localhost:8501/?lat=36.5&lon=3.125&date=2023-08-15&scenario=Summer+heatwave&run=1
+```
+
+| Parameter | Meaning |
+|---|---|
+| `lat`, `lon` | Coordinates in the study area; clamped to the valid range |
+| `date` | ISO date used for the seasonal features |
+| `scenario` | One of the four preset names (ignored if unknown) |
+| `run` | `1` scores once on arrival; omit it to open the form ready to edit |
+
+Only the location, date and scenario are encoded, because the manual weather
+inputs stay fully editable in the form.
+
+### Accessibility
+
+The shared design system (`dashboard/components.py`) provides visible
+`:focus-visible` rings on light and dark surfaces, a screen-reader-only helper,
+readable disabled controls, callouts announced through `role="alert"` /
+`role="status"`, and a `prefers-reduced-motion` fallback.
 
 ---
 
@@ -568,6 +614,7 @@ fire-risk-prediction/
 ├── requirements.txt
 ├── requirements-impact.txt
 ├── requirements-report.txt
+├── pyproject.toml                 # project metadata + pytest defaults
 ├── DATA_DOWNLOAD.md
 └── README.md
 ```
@@ -704,6 +751,10 @@ Run the test suite from the repository root:
 python -m pytest -q
 ```
 
+`pyproject.toml` points a bare `pytest` at `tests/`, so both commands are
+equivalent. The suite currently contains **263 tests**, including end-to-end
+Streamlit `AppTest` runs of the landing page.
+
 The tests include checks for:
 
 - Model artifact integrity.
@@ -712,6 +763,8 @@ The tests include checks for:
 - Data integrity and missing-data handling.
 - Geospatial processing assumptions.
 - The prediction helpers and the landing-page render.
+- Shareable-link parsing and the JSON export payload.
+- Accessibility contracts of the shared design system (focus, roles, motion).
 
 The impact validation script also produces a separate report describing errors, warnings, and successful checks.
 
