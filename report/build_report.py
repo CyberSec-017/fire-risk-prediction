@@ -561,7 +561,7 @@ def build_story(summary: dict[str, Any]) -> list[Any]:
         styled_table(
             [
                 ["Section", "Content"],
-                ["01 · Product", "The prediction-first interface: journey, presets and design decisions"],
+                ["01 · Product", "The prediction-first interface: journey, presets, supporting tools and design decisions"],
                 ["02 · Model & data", "Artifact, feature contract, dataset and chronological split"],
                 ["03 · Evaluation", "Test-period metrics, risk bands and year-by-year performance"],
                 ["04 · Evidence", "The ten figures produced by notebook.py"],
@@ -667,6 +667,29 @@ def build_story(summary: dict[str, Any]) -> list[Any]:
             "output is a <b>regional warning signal</b>, not a forecast of a specific fire, "
             "and not an official emergency notification.",
             EMBER,
+        )
+    )
+
+    story.append(Paragraph("Beyond a single score", STYLES["h2"]))
+    story.extend(
+        bullets(
+            [
+                "<b>Scenario comparison.</b> A collapsed table and bar chart score all four "
+                "presets on the same grid cell and date, so the model's response to weather "
+                "can be read next to the historical base rate.",
+                "<b>Stable results.</b> The result panel renders from a snapshot taken when "
+                "the user presses Predict. Editing an input afterwards raises a warning that "
+                "names the changed drivers instead of silently moving the displayed score.",
+                "<b>Shareable links.</b> Location, date and scenario are written to the URL "
+                "as <font face='DejaVu-Bold'>?lat=&amp;lon=&amp;date=&amp;scenario=&amp;run=1</font>. "
+                "A link carrying <font face='DejaVu-Bold'>run=1</font> re-scores on arrival, "
+                "which makes a result easy to discuss or cite.",
+                "<b>JSON export.</b> A downloadable record captures the model version, grid "
+                "cell, inputs, calibrated score, band and drivers for archiving or reporting.",
+                "<b>Accessibility.</b> The shared design system provides visible keyboard focus "
+                "rings on light and dark surfaces, announced callouts, readable disabled "
+                "controls and a reduced-motion fallback.",
+            ]
         )
     )
 
