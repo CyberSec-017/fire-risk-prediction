@@ -384,3 +384,17 @@ def test_result_stays_stable_and_flags_changed_inputs():
     # The displayed score must not silently drift with the edited input.
     match = re.search(r'class="fwx-prob"[^>]*>([\d.]+)%', rendered)
     assert match and match.group(1) == original
+
+
+def test_result_offers_a_json_export_and_share_panel():
+    app = run_page()
+    next(b for b in app.button if "Predict fire risk" in b.label).click().run()
+    assert not app.exception, app.exception
+
+    labels = [expander.label for expander in app.expander]
+    assert any("Share, bookmark or export" in label for label in labels)
+
+    downloads = [button.label for button in app.download_button]
+    assert any("Download prediction as JSON" in label for label in downloads)
+    # The export must point at a real media payload, not an empty placeholder.
+    assert app.download_button[0].proto.url.endswith(".json")
