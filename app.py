@@ -54,8 +54,10 @@ from dashboard.predictor import (
     PRESETS,
     baseline_comparison,
     build_feature_row,
+    changed_features,
     compare_presets,
     condition_summary,
+    feature_label,
     feature_sensitivity,
     format_pp,
     guidance_for,
@@ -690,6 +692,16 @@ with note_col:
 
 if run_prediction:
     st.session_state["has_prediction"] = True
+    st.session_state["prediction_snapshot"] = {
+        "features": dict(features),
+        "lat": float(in_lat),
+        "lon": float(in_lon),
+        "lat_cell": float(lat_cell),
+        "lon_cell": float(lon_cell),
+        "date": in_date,
+        "scenario": scenario,
+        "using_live": using_live,
+    }
 
 # ---------------------------------------------------------------------------
 # Step 3 — result
@@ -706,7 +718,9 @@ with st.container(border=True):
         unsafe_allow_html=True,
     )
 
-    if not st.session_state.get("has_prediction"):
+    if not st.session_state.get("has_prediction") or not st.session_state.get(
+        "prediction_snapshot"
+    ):
         st.info(
             "Set the location and fire weather above, then press **Predict fire risk**. "
             "The score, its drivers and field guidance will appear here."
@@ -714,11 +728,22 @@ with st.container(border=True):
     elif not model_ready:
         st.warning("Prediction is disabled until the model artifact loads successfully.")
     else:
+        snapshot = st.session_state["prediction_snapshot"]
+        scoring_features = snapshot["features"]
         try:
-            prediction = score_conditions(bundle, features)
+            prediction = score_conditions(bundle, scoring_features)
         except Exception as exc:  # noqa: BLE001 - keep the page alive
             st.error(f"Inference failed: {exc}")
         else:
+            stale = changed_features(features, scoring_features)
+            if stale:
+                shown = ", ".join(feature_label(name) for name in stale[:3])
+                remainder = f" and {len(stale) - 3} more" if len(stale) > 3 else ""
+                st.warning(
+                    f"Inputs changed since this prediction ({shown}{remainder}). "
+                    "The score below is kept stable on purpose — press "
+                    "**Predict fire risk** to refresh it."
+                )
             cfg = RISK_LEVELS.get(prediction.risk_level, RISK_LEVELS["Moderate"])
             index = max(0.0, min(100.0, float(prediction.risk_index)))
             comparison = baseline_comparison(prediction.probability, base_rate)
@@ -733,7 +758,7 @@ with st.container(border=True):
                 if prediction.source == "REAL"
                 else "Demo heuristic (model missing)"
             )
-            summary = condition_summary(features)
+            summary = condition_summary(scoring_features)
 
             left, right = st.columns([1, 2.05])
 
@@ -761,8 +786,8 @@ with st.container(border=True):
                                 font-size:0.76rem;color:{COLORS['text_secondary']};line-height:1.6;">
                         <b>{multiple_text}</b><br>
                         Historical base rate: {base_rate * 100:.2f}% of cell-days<br>
-                        Grid cell: {lat_cell:.3f}°N, {lon_cell:.3f}°E · {in_date:%Y-%m-%d}
-                        {(' · live NASA POWER' if using_live else '')}
+                        Grid cell: {snapshot['lat_cell']:.3f}°N, {snapshot['lon_cell']:.3f}°E · {snapshot['date']:%Y-%m-%d}
+                        {(' · live NASA POWER' if snapshot['using_live'] else '')}
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -784,7 +809,7 @@ with st.container(border=True):
                 )
 
                 drivers = (
-                    feature_sensitivity(bundle, features, top_n=7)
+                    feature_sensitivity(bundle, scoring_features, top_n=7)
                     if prediction.source == "REAL"
                     else pd.DataFrame()
                 )
