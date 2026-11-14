@@ -1,0 +1,29 @@
+{
+  "LogisticRegression": {
+    "clf__C": 0.01,
+    "clf__class_weight": null
+  },
+  "DecisionTreeClassifier": {
+    "clf__class_weight": "balanced",
+    "clf__max_depth": 15,
+    "clf__min_samples_leaf": 100
+  },
+  "RandomForestClassifier": {
+    "clf__class_weight": null,
+    "clf__max_depth": 12,
+    "clf__min_samples_leaf": 20
+  },
+  "HistGradientBoostingClassifier": {
+    "l2_regularization": 0.1,
+    "learning_rate": 0.03,
+    "max_depth": 8,
+    "min_samples_leaf": 100
+  },
+  "KNeighborsClassifier": {
+    "clf__n_neighbors": 15,
+    "clf__weights": "distance"
+  },
+  "GaussianNB": {
+    "clf__var_smoothing": 1e-11
+  }
+}
