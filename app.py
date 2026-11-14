@@ -615,13 +615,13 @@ with st.container(border=True):
             fetch_live = st.button(
                 "Fetch NASA POWER history",
                 key="fetch_live",
-                use_container_width=True,
+                width="stretch",
             )
         with lc2:
             clear_live = st.button(
                 "Clear live data",
                 key="clear_live",
-                use_container_width=True,
+                width="stretch",
                 disabled=live_state is None,
             )
 
@@ -701,7 +701,7 @@ with predict_col:
     run_prediction = st.button(
         "🔥 Predict fire risk",
         type="primary",
-        use_container_width=True,
+        width="stretch",
         disabled=not model_ready,
         key="predict_button",
     )
@@ -905,7 +905,7 @@ with st.container(border=True):
                         yaxis=dict(tickfont=dict(size=10), title=None),
                         showlegend=False,
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
 
                 guidance = guidance_for(prediction.risk_label)
                 items = "".join(f"<li>{item}</li>" for item in guidance)
@@ -1015,7 +1015,7 @@ with st.expander("Compare the four scenarios at this location", expanded=False):
         st.dataframe(
             display,
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
             column_config={
                 "Probability (%)": st.column_config.ProgressColumn(
                     "Probability (%)",
@@ -1071,7 +1071,7 @@ with st.expander("Compare the four scenarios at this location", expanded=False):
             yaxis=dict(tickfont=dict(size=10), title=None),
             showlegend=False,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
         st.caption(
             "Presets only prefill the form; every value above remains editable in step 2."
         )
@@ -1137,7 +1137,7 @@ with st.expander("Model card, metrics and data provenance", expanded=False):
     ]
     st.dataframe(
         pd.DataFrame(metric_rows, columns=["Metric", "Value"]),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
     st.caption(
@@ -1157,7 +1157,7 @@ with st.expander("Model card, metrics and data provenance", expanded=False):
                 }
             )[["Metric", "Model card snapshot", "Reproducible evaluation"]],
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
         )
         st.caption(
             "The deployed model is unchanged. The model card records the metrics "
@@ -1184,5 +1184,5 @@ links = [
 ]
 for column, (path, label, caption) in zip(nav_cols, links):
     with column:
-        st.page_link(path, label=label, use_container_width=True)
+        st.page_link(path, label=label, width="stretch")
         st.caption(caption)

@@ -437,7 +437,7 @@ with tabs[1]:
             "Land-cover composition",
             "Potential exposure by ESA WorldCover class; not burned area",
         )
-        st.plotly_chart(landcover_composition(assessed), use_container_width=True)
+        st.plotly_chart(landcover_composition(assessed), width="stretch")
 
         landcover_columns = [
             column
@@ -452,7 +452,7 @@ with tabs[1]:
         ]
         st.dataframe(
             assessed[display_columns],
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
         st.caption(
@@ -512,7 +512,7 @@ with tabs[2]:
             )
             st.dataframe(
                 ring_data.frame[ring_columns],
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
         elif ring_data.available:
@@ -523,7 +523,7 @@ with tabs[2]:
         if settlements_data.available:
             st.dataframe(
                 settlements_data.frame,
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
         else:
@@ -577,7 +577,7 @@ with tabs[3]:
         ]
         st.dataframe(
             assessed[display_columns],
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
         st.caption(
@@ -588,7 +588,7 @@ with tabs[3]:
         if infrastructure_data.available:
             st.dataframe(
                 infrastructure_data.frame,
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
         else:
@@ -610,7 +610,7 @@ with tabs[4]:
     )
     st.dataframe(
         pd.DataFrame(priority_matrix_rows()),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -623,7 +623,7 @@ with tabs[4]:
             .rename_axis("Priority label")
             .reset_index(name="Cells")
         )
-        st.dataframe(distribution, use_container_width=True, hide_index=True)
+        st.dataframe(distribution, width="stretch", hide_index=True)
         st.caption(
             "Priority 1–5 combines the predicted risk band with the static "
             "exposure tier. Cells outside the model area are labelled "
@@ -636,11 +636,11 @@ with tabs[4]:
         )
         st.plotly_chart(
             risk_exposure_scatter(assessed, card=model.card),
-            use_container_width=True,
+            width="stretch",
         )
         st.plotly_chart(
             regional_comparison(assessed),
-            use_container_width=True,
+            width="stretch",
         )
         st.caption(
             "Regional comparison uses administrative assignment when "
@@ -691,7 +691,7 @@ with tabs[5]:
                 data=report.html or "",
                 file_name="firewatch_impact_report.html",
                 mime="text/html",
-                use_container_width=True,
+                width="stretch",
                 key="impact_download_html",
             )
         with d2:
@@ -700,7 +700,7 @@ with tabs[5]:
                 data=report.csv or "",
                 file_name="firewatch_impact_report.csv",
                 mime="text/csv",
-                use_container_width=True,
+                width="stretch",
                 key="impact_download_csv",
             )
         with d3:
@@ -709,7 +709,7 @@ with tabs[5]:
                 data=report.json_text or "",
                 file_name="firewatch_impact_report.json",
                 mime="application/json",
-                use_container_width=True,
+                width="stretch",
                 key="impact_download_json",
             )
 

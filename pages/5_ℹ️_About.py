@@ -133,7 +133,7 @@ with tab_sources:
             "Measurement Unit": v["unit"],
             "Physical Relevance to Wildfire Behavior": v["description"],
         })
-    st.dataframe(pd.DataFrame(var_table_rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(var_table_rows), width="stretch", hide_index=True)
 
 # Tab 2: ETL Pipeline
 with tab_pipeline:

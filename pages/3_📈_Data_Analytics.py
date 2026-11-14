@@ -166,13 +166,13 @@ with tab_drivers:
     with col_g1:
         st.plotly_chart(
             weather_distribution_comparison(filtered_df, var_key=target_var),
-            use_container_width=True,
+            width="stretch",
             key="analytics_dist_comp",
         )
     with col_g2:
         st.plotly_chart(
             weather_time_series_trend(filtered_df, var_key=target_var, freq="W"),
-            use_container_width=True,
+            width="stretch",
             key="analytics_ts_trend",
         )
 
@@ -187,13 +187,13 @@ with tab_spatial:
     with col_sp1:
         st.plotly_chart(
             fire_by_latitude_profile(filtered_df),
-            use_container_width=True,
+            width="stretch",
             key="analytics_lat_prof",
         )
     with col_sp2:
         st.plotly_chart(
             fire_by_longitude_profile(filtered_df),
-            use_container_width=True,
+            width="stretch",
             key="analytics_lon_prof",
         )
 
@@ -208,7 +208,7 @@ with tab_corr:
     with col_c1:
         st.plotly_chart(
             weather_correlation_heatmap(filtered_df),
-            use_container_width=True,
+            width="stretch",
             key="analytics_corr_mat",
         )
 
@@ -229,7 +229,7 @@ with tab_corr:
 
         st.plotly_chart(
             bivariate_weather_scatter(filtered_df, var_x=scatter_x, var_y=scatter_y),
-            use_container_width=True,
+            width="stretch",
             key="analytics_bivariate",
         )
 
