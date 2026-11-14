@@ -6,6 +6,8 @@ executes the real ``app.py`` script end to end.
 
 from __future__ import annotations
 
+import datetime as dt
+import json
 import sys
 from pathlib import Path
 
@@ -17,17 +19,25 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import app_core  # noqa: E402
-from dashboard.config import MODEL_FEATURES  # noqa: E402
+from dashboard.config import LAT_MAX, MODEL_FEATURES  # noqa: E402
 from dashboard.predictor import (  # noqa: E402
+    PRESET_ORDER,
     PRESETS,
     baseline_comparison,
     build_feature_row,
+    changed_features,
+    compare_presets,
     condition_summary,
+    feature_label,
     feature_sensitivity,
     format_pp,
     guidance_for,
+    prediction_payload,
+    read_share_params,
     risk_narrative,
     score_conditions,
+    share_query,
+    share_url,
 )
 
 BUNDLE = app_core.load_model_bundle()
@@ -169,6 +179,132 @@ def test_condition_summary_reads_engineered_rain():
 
 
 # ---------------------------------------------------------------------------
+# Scenario comparison
+# ---------------------------------------------------------------------------
+
+def test_compare_presets_orders_fire_weather():
+    if BUNDLE.status != "REAL":
+        pytest.skip("trained model artifact not available")
+
+    table = compare_presets(
+        BUNDLE,
+        36.5,
+        3.125,
+        "2023-08-15",
+        card=CARD,
+    )
+
+    assert list(table["scenario"]) == PRESET_ORDER
+    assert len(table) == len(PRESET_ORDER)
+    assert set(table["risk_level"]).issubset(
+        {"Low", "Moderate", "High", "Very High"}
+    )
+    scores = table.set_index("scenario")["percent"]
+    assert scores["Summer heatwave"] > scores["Winter wet"]
+    assert (table["multiple"] >= 0).all()
+
+
+# ---------------------------------------------------------------------------
+# Shareable links
+# ---------------------------------------------------------------------------
+
+def test_share_query_round_trip():
+    params = share_query(
+        lat=36.5,
+        lon=3.125,
+        when="2023-08-15",
+        scenario="Summer heatwave",
+    )
+
+    assert params["lat"] == "36.5"
+    assert params["date"] == "2023-08-15"
+    assert params["run"] == "1"
+
+    restored = read_share_params(params)
+    assert restored["lat"] == pytest.approx(36.5)
+    assert restored["lon"] == pytest.approx(3.125)
+    assert restored["date"].isoformat() == "2023-08-15"
+    assert restored["scenario"] == "Summer heatwave"
+    assert restored["run"] is True
+    assert restored["from_link"] is True
+
+
+def test_read_share_params_clamps_and_ignores_garbage():
+    fallback = dt.date(2024, 7, 1)
+    parsed = read_share_params(
+        {
+            "lat": "999",
+            "lon": "not-a-number",
+            "date": "not-a-date",
+            "scenario": "Monsoon",
+            "run": "0",
+        },
+        default_date=fallback,
+    )
+
+    assert parsed["lat"] == pytest.approx(LAT_MAX)
+    assert parsed["lon"] == pytest.approx(3.125)
+    assert parsed["date"] == fallback
+    assert parsed["scenario"] is None
+    assert parsed["run"] is False
+
+
+def test_share_url_encodes_the_query():
+    url = share_url(
+        "http://localhost:8501/",
+        {"lat": "36.5", "scenario": "Summer heatwave"},
+    )
+    assert url.startswith("http://localhost:8501/?")
+    assert "scenario=Summer+heatwave" in url
+
+
+# ---------------------------------------------------------------------------
+# Staleness and export
+# ---------------------------------------------------------------------------
+
+def test_changed_features_detects_only_real_edits():
+    row = build_feature_row(**conditions(), card=CARD)
+    assert changed_features(row, dict(row)) == []
+
+    edited = dict(row)
+    edited["T2M_MAX"] += 0.5
+    edited["RH2M"] -= 3.0
+    changed = changed_features(edited, row)
+
+    assert set(changed) == {"T2M_MAX", "RH2M"}
+    assert feature_label("T2M_MAX") == "Daily max temperature"
+
+
+def test_prediction_payload_is_json_serialisable():
+    if BUNDLE.status != "REAL":
+        pytest.skip("trained model artifact not available")
+
+    row = build_feature_row(**conditions(), card=CARD)
+    prediction = score_conditions(BUNDLE, row)
+    drivers = feature_sensitivity(BUNDLE, row, top_n=3)
+    payload = prediction_payload(
+        prediction=prediction,
+        features=row,
+        lat=36.5,
+        lon=3.125,
+        when="2023-08-15",
+        scenario="Summer heatwave",
+        model_version=CARD.get("model_version", "unknown"),
+        base_rate=CARD["metrics"]["base_rate"],
+        sensitivity=drivers,
+    )
+
+    encoded = json.dumps(payload)
+    assert json.loads(encoded)["result"]["probability"] == pytest.approx(
+        prediction.probability, abs=1e-6
+    )
+    assert payload["location"]["grid_cell"]["lat_cell"] == pytest.approx(36.5)
+    assert payload["model"]["horizon_days"] == 3
+    assert len(payload["drivers"]) == len(drivers)
+    assert payload["disclaimer"]
+
+
+# ---------------------------------------------------------------------------
 # Landing page smoke test
 # ---------------------------------------------------------------------------
 from streamlit.testing.v1 import AppTest  # noqa: E402
@@ -208,3 +344,18 @@ def test_clicking_predict_shows_probability_and_guidance():
     assert "probability of an observed fire" in rendered
     assert "Recommended actions" in rendered
     assert "Calibrated model v" in rendered or "Demo heuristic" in rendered
+
+
+def test_landing_page_compares_scenarios():
+    app = run_page()
+
+    assert not app.exception, app.exception
+    labels = [expander.label for expander in app.expander]
+    assert any("Compare the four scenarios" in label for label in labels)
+    captions = " ".join(item.value for item in app.caption)
+    assert "isolates how" in captions
+    # The comparison table must expose all four presets at once.
+    tables = [frame.value for frame in app.dataframe]
+    scenario_tables = [table for table in tables if "Scenario" in list(table.columns)]
+    assert scenario_tables
+    assert scenario_tables[0]["Scenario"].tolist() == list(PRESET_ORDER)

@@ -14,15 +14,23 @@ Keeping this module free of Streamlit makes it directly unit-testable.
 
 from __future__ import annotations
 
+import datetime as dt
 import math
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
+from urllib.parse import urlencode
 
 import numpy as np
 import pandas as pd
 
 import app_core
-from dashboard.config import MODEL_FEATURES
+from dashboard.config import (
+    LAT_MAX,
+    LAT_MIN,
+    LON_MAX,
+    LON_MIN,
+    MODEL_FEATURES,
+)
 
 # ---------------------------------------------------------------------------
 # Scenario presets shared by the landing page and the cockpit
@@ -384,3 +392,248 @@ def rank_risk(probabilities: Sequence[float]) -> np.ndarray:
         return values
     order = values.argsort().argsort()
     return order / max(values.size - 1, 1) * 100.0
+
+
+# ---------------------------------------------------------------------------
+# Scenario comparison
+# ---------------------------------------------------------------------------
+
+def compare_presets(
+    bundle: Any,
+    lat: float,
+    lon: float,
+    when: Any,
+    *,
+    card: Mapping[str, Any] | None = None,
+    names: Sequence[str] | None = None,
+) -> pd.DataFrame:
+    """Score every scenario preset at the same location and date.
+
+    Returns one row per scenario with the probability, the risk band and how
+    that probability compares with the historical base rate.  This turns the
+    presets into a small sensitivity study of the model itself.
+    """
+    card = card if card is not None else getattr(bundle, "card", None)
+    base_rate = 0.0237
+    if card:
+        base_rate = float(card.get("metrics", {}).get("base_rate", base_rate) or base_rate)
+
+    selected = list(names) if names is not None else list(PRESET_ORDER)
+    rows: list[dict[str, Any]] = []
+    for name in selected:
+        preset = PRESETS[name]
+        features = build_feature_row(
+            lat,
+            lon,
+            when,
+            t2m_max=float(preset["T2M_MAX"]),
+            rh2m=float(preset["RH2M"]),
+            ws2m=float(preset["WS2M"]),
+            precip=float(preset["PRECTOTCORR"]),
+            gwetroot=float(preset["GWETROOT"]),
+            dry_days=float(preset["dry_days"]),
+            card=card,
+        )
+        prediction = score_conditions(bundle, features)
+        rows.append(
+            {
+                "scenario": name,
+                "description": preset.get("description", ""),
+                "probability": prediction.probability,
+                "percent": prediction.percent,
+                "risk_level": prediction.risk_level,
+                "multiple": (
+                    prediction.probability / base_rate if base_rate > 0 else float("nan")
+                ),
+            }
+        )
+
+    return pd.DataFrame(
+        rows,
+        columns=[
+            "scenario",
+            "description",
+            "probability",
+            "percent",
+            "risk_level",
+            "multiple",
+        ],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Shareable links
+# ---------------------------------------------------------------------------
+
+def share_query(
+    *,
+    lat: float,
+    lon: float,
+    when: Any,
+    scenario: str | None = None,
+    run: bool = True,
+) -> dict[str, str]:
+    """Build the query parameters that reproduce one prediction."""
+    date = when.isoformat() if hasattr(when, "isoformat") else str(when)
+    params = {
+        "lat": f"{float(lat):g}",
+        "lon": f"{float(lon):g}",
+        "date": date[:10],
+    }
+    if scenario:
+        params["scenario"] = str(scenario)
+    params["run"] = "1" if run else "0"
+    return params
+
+
+def share_url(base_url: str, params: Mapping[str, str]) -> str:
+    """Append an encoded query string to a base URL."""
+    separator = "&" if "?" in base_url else "?"
+    return f"{base_url}{separator}{urlencode(dict(params))}"
+
+
+def _to_float(value: Any, default: float, low: float, high: float) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(number):
+        return default
+    return min(max(number, low), high)
+
+
+def read_share_params(
+    params: Mapping[str, Any],
+    *,
+    default_date: dt.date | None = None,
+) -> dict[str, Any]:
+    """Normalise untrusted query parameters into usable widget defaults.
+
+    Values outside the study area are clamped instead of rejected so a shared
+    link always renders; an unknown scenario simply leaves the form as-is.
+    """
+    default_date = default_date or dt.date.today()
+    when = default_date
+    raw_date = params.get("date")
+    if raw_date:
+        try:
+            when = dt.date.fromisoformat(str(raw_date)[:10])
+        except ValueError:
+            when = default_date
+
+    scenario = params.get("scenario")
+    if scenario is not None and scenario not in PRESETS:
+        scenario = None
+
+    has_location = any(key in params for key in ("lat", "lon", "date", "scenario"))
+    run_value = str(params.get("run", "")).strip().lower()
+    return {
+        "lat": _to_float(params.get("lat"), 36.5, LAT_MIN, LAT_MAX),
+        "lon": _to_float(params.get("lon"), 3.125, LON_MIN, LON_MAX),
+        "date": when,
+        "scenario": scenario,
+        "run": run_value in {"1", "true", "yes"},
+        "from_link": has_location,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Staleness and export
+# ---------------------------------------------------------------------------
+
+def changed_features(
+    current: Mapping[str, float],
+    snapshot: Mapping[str, float],
+    *,
+    tolerance: float = 1e-6,
+) -> list[str]:
+    """Feature names whose value differs between the inputs and a snapshot."""
+    changed: list[str] = []
+    for name, previous in snapshot.items():
+        if name not in current:
+            continue
+        try:
+            same = math.isclose(
+                float(current[name]), float(previous), rel_tol=0.0, abs_tol=tolerance
+            )
+        except (TypeError, ValueError):
+            same = current[name] == previous
+        if not same:
+            changed.append(name)
+    return changed
+
+
+def feature_label(name: str) -> str:
+    """Readable label for a model feature name."""
+    return FEATURE_LABELS.get(name, name)
+
+
+def prediction_payload(
+    *,
+    prediction: Any,
+    features: Mapping[str, float],
+    lat: float,
+    lon: float,
+    when: Any,
+    scenario: str | None,
+    model_version: str,
+    base_rate: float,
+    using_live: bool = False,
+    sensitivity: pd.DataFrame | None = None,
+    generated_at: dt.datetime | None = None,
+) -> dict[str, Any]:
+    """JSON-serialisable record of a single prediction."""
+    generated = generated_at or dt.datetime.now(dt.timezone.utc)
+    comparison = baseline_comparison(prediction.probability, base_rate)
+    drivers: list[dict[str, Any]] = []
+    if sensitivity is not None and not sensitivity.empty:
+        drivers = [
+            {
+                "feature": str(row.feature),
+                "label": str(row.label),
+                "delta_pp": round(float(row.delta_pp), 4),
+                "direction": str(row.direction),
+            }
+            for row in sensitivity.itertuples(index=False)
+        ]
+
+    return {
+        "project": "FIREWATCH AI",
+        "generated_at": generated.isoformat(timespec="seconds"),
+        "model": {
+            "version": model_version,
+            "source": prediction.source,
+            "horizon_days": 3,
+        },
+        "location": {
+            "latitude": round(float(lat), 4),
+            "longitude": round(float(lon), 4),
+            "date": str(when)[:10],
+            "grid_cell": {
+                "lat_cell": round(float(features.get("lat_cell", float("nan"))), 4),
+                "lon_cell": round(float(features.get("lon_cell", float("nan"))), 4),
+            },
+        },
+        "scenario": scenario,
+        "inputs": {name: round(float(value), 4) for name, value in features.items()},
+        "result": {
+            "probability": round(float(prediction.probability), 6),
+            "percent": round(float(prediction.percent), 4),
+            "risk_level": prediction.risk_level,
+            "risk_label": prediction.risk_label,
+            "risk_index": round(float(prediction.risk_index), 2),
+            "multiple_of_base_rate": (
+                round(float(comparison["multiple"]), 3)
+                if math.isfinite(float(comparison["multiple"]))
+                else None
+            ),
+            "base_rate": round(float(base_rate), 6),
+            "weather_source": "nasa_power_live" if using_live else "manual_inputs",
+        },
+        "drivers": drivers,
+        "disclaimer": (
+            "Calibrated probability of an observed fire in the next 3 days for a "
+            "coarse grid cell. Decision-support signal, not an official emergency "
+            "forecast."
+        ),
+    }
