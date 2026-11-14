@@ -1,0 +1,8 @@
+# Report-only dependency for report/build_report.py.
+#
+# This is NOT needed to run the Streamlit application, the model or the tests.
+# It is only required to regenerate report/FIREWATCH_AI_Report.pdf.
+#
+# Install with:
+#     python -m pip install -r requirements-report.txt
+reportlab==5.1.0
