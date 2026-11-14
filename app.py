@@ -54,6 +54,7 @@ from dashboard.predictor import (
     PRESETS,
     baseline_comparison,
     build_feature_row,
+    compare_presets,
     condition_summary,
     feature_sensitivity,
     format_pp,
@@ -873,6 +874,96 @@ with st.container(border=True):
                 """,
                 unsafe_allow_html=True,
             )
+
+# ---------------------------------------------------------------------------
+# Scenario comparison
+# ---------------------------------------------------------------------------
+st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
+with st.expander("Compare the four scenarios at this location", expanded=False):
+    st.caption(
+        "Same grid cell and date, four standard fire-weather setups. This isolates how "
+        "the calibrated model responds to weather alone — the manual values in step 2 "
+        "are intentionally ignored here."
+    )
+    if not model_ready:
+        st.info("The comparison becomes available once the model artifact loads.")
+    else:
+        comparison = compare_presets(
+            bundle, in_lat, in_lon, in_date, card=bundle.card
+        )
+        display = comparison[
+            ["scenario", "description", "percent", "risk_level", "multiple"]
+        ].copy()
+        display.columns = [
+            "Scenario",
+            "Description",
+            "Probability (%)",
+            "Band",
+            "× base rate",
+        ]
+        st.dataframe(
+            display,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Probability (%)": st.column_config.ProgressColumn(
+                    "Probability (%)",
+                    help="Calibrated probability of an observed fire in the next 3 days.",
+                    min_value=0.0,
+                    max_value=100.0,
+                    format="%.2f%%",
+                ),
+                "× base rate": st.column_config.NumberColumn(
+                    "× base rate",
+                    help="How many times the historical base rate this score represents.",
+                    format="%.1f×",
+                ),
+            },
+        )
+
+        ordered = comparison.sort_values("percent")
+        fig = go.Figure(
+            go.Bar(
+                x=ordered["percent"],
+                y=ordered["scenario"],
+                orientation="h",
+                marker_color=[
+                    RISK_LEVELS.get(level, RISK_LEVELS["Moderate"])["color"]
+                    for level in ordered["risk_level"]
+                ],
+                text=[f"{value:.2f}%" for value in ordered["percent"]],
+                textposition="outside",
+                cliponaxis=False,
+                hovertemplate="%{y}<br>%{x:.2f}% probability<extra></extra>",
+            )
+        )
+        fig.add_vline(
+            x=base_rate * 100,
+            line_dash="dot",
+            line_color=COLORS["text_muted"],
+            annotation_text=f"base rate {base_rate * 100:.2f}%",
+            annotation_position="top",
+            annotation_font_size=9,
+        )
+        fig.update_layout(
+            template="plotly_white",
+            height=260,
+            margin=dict(l=10, r=54, t=28, b=34),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(family="Inter, Segoe UI, sans-serif", size=11),
+            xaxis=dict(
+                title="Probability of an observed fire in 3 days (%)",
+                gridcolor="#F1F5F9",
+                tickfont=dict(size=10),
+            ),
+            yaxis=dict(tickfont=dict(size=10), title=None),
+            showlegend=False,
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption(
+            "Presets only prefill the form; every value above remains editable in step 2."
+        )
 
 # ---------------------------------------------------------------------------
 # How it works
