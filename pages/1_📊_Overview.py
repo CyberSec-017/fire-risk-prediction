@@ -143,15 +143,15 @@ tab_weekly, tab_daily, tab_monthly = st.tabs(["Weekly Aggregation", "Daily Resol
 
 with tab_weekly:
     fig_w = fire_detections_timeline(df, freq="W")
-    st.plotly_chart(fig_w, use_container_width=True, key="overview_weekly")
+    st.plotly_chart(fig_w, width="stretch", key="overview_weekly")
 
 with tab_daily:
     fig_d = fire_detections_timeline(df, freq="D")
-    st.plotly_chart(fig_d, use_container_width=True, key="overview_daily")
+    st.plotly_chart(fig_d, width="stretch", key="overview_daily")
 
 with tab_monthly:
     fig_m = fire_detections_timeline(df, freq="ME")
-    st.plotly_chart(fig_m, use_container_width=True, key="overview_monthly")
+    st.plotly_chart(fig_m, width="stretch", key="overview_monthly")
 
 # Seasonal & Multi-Year Breakdowns
 col_s1, col_s2 = st.columns(2)
@@ -162,7 +162,7 @@ with col_s1:
         subtitle="Cumulative fire cell counts by calendar month",
     )
     fig_dist = monthly_fire_distribution(df)
-    st.plotly_chart(fig_dist, use_container_width=True, key="overview_season")
+    st.plotly_chart(fig_dist, width="stretch", key="overview_season")
 
 with col_s2:
     render_section_header(
@@ -170,7 +170,7 @@ with col_s2:
         subtitle=f"Annual fire cell-day distribution across the observation timeline ({min_d.year}–{max_d.year})",
     )
     fig_yearly = yearly_fire_breakdown(df)
-    st.plotly_chart(fig_yearly, use_container_width=True, key="overview_yearly")
+    st.plotly_chart(fig_yearly, width="stretch", key="overview_yearly")
 
 # Environmental Baseline Table
 render_section_header(
@@ -195,4 +195,4 @@ for key, meta in WEATHER_VARIABLES.items():
         })
 
 stats_df = pd.DataFrame(stats_rows)
-st.dataframe(stats_df, use_container_width=True, hide_index=True)
+st.dataframe(stats_df, width="stretch", hide_index=True)
