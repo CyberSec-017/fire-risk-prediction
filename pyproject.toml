@@ -1,0 +1,22 @@
+[project]
+name = "firewatch-ai"
+version = "0.1.0"
+description = "Wildfire risk prediction, geospatial monitoring and impact assessment for northern Algeria."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "FireWatch Contributor", email = "tttrr9576@gmail.com" }]
+keywords = ["wildfire", "risk", "nasa-firms", "nasa-power", "streamlit", "machine-learning"]
+classifiers = [
+    "Environment :: Science/Research",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: GIS",
+]
+
+# Runtime dependencies stay pinned in requirements.txt, requirements-impact.txt
+# and requirements-report.txt so the trained artifact keeps its exact stack.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
