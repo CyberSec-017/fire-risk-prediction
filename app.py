@@ -61,8 +61,11 @@ from dashboard.predictor import (
     feature_sensitivity,
     format_pp,
     guidance_for,
+    read_share_params,
     risk_narrative,
     score_conditions,
+    share_query,
+    share_url,
 )
 
 # ---------------------------------------------------------------------------
@@ -315,6 +318,18 @@ st.markdown(_FIRE_CSS, unsafe_allow_html=True)
 render_sidebar()
 
 # ---------------------------------------------------------------------------
+# Shareable state (?lat=&lon=&date=&scenario=&run=1)
+# ---------------------------------------------------------------------------
+_shared = read_share_params(
+    st.query_params.to_dict(), default_date=datetime.date.today()
+)
+_default_scenario = (
+    PRESET_ORDER.index(_shared["scenario"])
+    if _shared["scenario"] in PRESET_ORDER
+    else 0
+)
+
+# ---------------------------------------------------------------------------
 # Model + reference facts
 # ---------------------------------------------------------------------------
 bundle = load_model()
@@ -397,7 +412,7 @@ with st.container(border=True):
             "Latitude (°N)",
             min_value=float(LAT_MIN),
             max_value=float(LAT_MAX),
-            value=36.5,
+            value=float(_shared["lat"]),
             step=0.5,
             key="in_lat",
             help="Study area: 32.0°N–37.5°N (northern Algeria).",
@@ -407,7 +422,7 @@ with st.container(border=True):
             "Longitude (°E)",
             min_value=float(LON_MIN),
             max_value=float(LON_MAX),
-            value=3.125,
+            value=float(_shared["lon"]),
             step=0.625,
             key="in_lon",
             help="Study area: -2.0°E–9.0°E.",
@@ -415,7 +430,7 @@ with st.container(border=True):
     with loc3:
         in_date = st.date_input(
             "Date",
-            value=datetime.date.today(),
+            value=_shared["date"],
             key="in_date",
             help="Controls the seasonal features (day-of-year sine and cosine).",
         )
@@ -450,7 +465,7 @@ with st.container(border=True):
     scenario = st.radio(
         "Scenario",
         PRESET_ORDER,
-        index=0,
+        index=_default_scenario,
         horizontal=True,
         key="scenario",
         label_visibility="collapsed",
@@ -682,6 +697,12 @@ with predict_col:
         disabled=not model_ready,
         key="predict_button",
     )
+
+# A shared link with run=1 scores once on arrival, then behaves like a normal
+# session so later edits still show the "inputs changed" warning.
+if _shared["run"] and not st.session_state.get("share_consumed"):
+    st.session_state["share_consumed"] = True
+    run_prediction = run_prediction or model_ready
 with note_col:
     st.markdown(
         f"<div style='font-size:0.76rem;color:{COLORS['text_muted']};padding-top:14px;line-height:1.5;'>"
@@ -692,6 +713,7 @@ with note_col:
 
 if run_prediction:
     st.session_state["has_prediction"] = True
+    st.session_state["share_consumed"] = True
     st.session_state["prediction_snapshot"] = {
         "features": dict(features),
         "lat": float(in_lat),
@@ -702,6 +724,15 @@ if run_prediction:
         "scenario": scenario,
         "using_live": using_live,
     }
+    st.query_params.update(
+        share_query(
+            lat=in_lat,
+            lon=in_lon,
+            when=in_date,
+            scenario=scenario,
+            run=True,
+        )
+    )
 
 # ---------------------------------------------------------------------------
 # Step 3 — result
@@ -899,6 +930,24 @@ with st.container(border=True):
                 """,
                 unsafe_allow_html=True,
             )
+
+            with st.expander("Share or bookmark this prediction", expanded=False):
+                st.caption(
+                    "Append this query string to the app URL to reopen the page with the same "
+                    "location, date and scenario. `run=1` re-scores automatically on arrival."
+                )
+                st.code(
+                    share_url(
+                        "",
+                        share_query(
+                            lat=snapshot["lat"],
+                            lon=snapshot["lon"],
+                            when=snapshot["date"],
+                            scenario=snapshot["scenario"],
+                        ),
+                    ),
+                    language="text",
+                )
 
 # ---------------------------------------------------------------------------
 # Scenario comparison
