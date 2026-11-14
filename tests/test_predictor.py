@@ -32,7 +32,9 @@ from dashboard.predictor import (  # noqa: E402
     feature_sensitivity,
     format_pp,
     guidance_for,
+    metric_drift,
     prediction_payload,
+    read_evaluation_metrics,
     read_share_params,
     risk_narrative,
     score_conditions,
@@ -398,3 +400,46 @@ def test_result_offers_a_json_export_and_share_panel():
     assert any("Download prediction as JSON" in label for label in downloads)
     # The export must point at a real media payload, not an empty placeholder.
     assert app.download_button[0].proto.url.endswith(".json")
+
+
+# ---------------------------------------------------------------------------
+# Metric provenance
+# ---------------------------------------------------------------------------
+
+def test_read_evaluation_metrics_is_defensive(tmp_path):
+    assert read_evaluation_metrics(tmp_path / "absent.json") == {}
+
+    broken = tmp_path / "broken.json"
+    broken.write_text("{not json", encoding="utf-8")
+    assert read_evaluation_metrics(broken) == {}
+
+    good = tmp_path / "good.json"
+    good.write_text(
+        json.dumps({"metrics": {"pr_auc": 0.2441, "base_rate": "unknown"}}),
+        encoding="utf-8",
+    )
+    assert read_evaluation_metrics(good) == {"pr_auc": pytest.approx(0.2441)}
+
+
+def test_metric_drift_flags_only_real_changes():
+    table = metric_drift(
+        {"pr_auc": 0.1582, "base_rate": 0.0237},
+        {"pr_auc": 0.2441, "base_rate": 0.0237},
+    )
+
+    assert list(table["metric"]) == ["Precision-Recall AUC", "Base fire rate"]
+    indexed = table.set_index("metric")
+    assert indexed.loc["Precision-Recall AUC", "changed"]
+    assert not indexed.loc["Base fire rate", "changed"]
+    assert indexed.loc["Precision-Recall AUC", "model_card"] == "0.1582"
+    assert indexed.loc["Precision-Recall AUC", "reproducible"] == "0.2441"
+
+
+def test_landing_page_explains_metric_drift():
+    app = run_page()
+
+    assert not app.exception, app.exception
+    tables = [frame.value for frame in app.dataframe]
+    assert any("Model card snapshot" in list(table.columns) for table in tables)
+    captions = " ".join(item.value for item in app.caption)
+    assert "deployed model is unchanged" in captions

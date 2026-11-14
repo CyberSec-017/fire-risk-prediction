@@ -15,8 +15,10 @@ Keeping this module free of Streamlit makes it directly unit-testable.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import math
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping, Sequence
 from urllib.parse import urlencode
 
@@ -637,3 +639,74 @@ def prediction_payload(
             "forecast."
         ),
     }
+
+# ---------------------------------------------------------------------------
+# Metric provenance
+# ---------------------------------------------------------------------------
+
+DRIFT_METRICS: tuple[tuple[str, str, str], ...] = (
+    ("pr_auc", "Precision-Recall AUC", "{:.4f}"),
+    ("base_rate", "Base fire rate", "{:.2%}"),
+    ("brier", "Brier score", "{:.5f}"),
+    ("top_decile_fire_share", "Fires in the top decile", "{:.1%}"),
+)
+
+
+def read_evaluation_metrics(path: str | Path) -> dict[str, float]:
+    """Read the test-period metrics from ``report/evaluation_summary.json``.
+
+    Returns an empty mapping when the file is missing or malformed so the
+    landing page can fall back to the model card without failing.
+    """
+    try:
+        with open(path, encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    metrics = payload.get("metrics") if isinstance(payload, dict) else None
+    if not isinstance(metrics, dict):
+        return {}
+    clean: dict[str, float] = {}
+    for key in ("pr_auc", "base_rate", "brier", "top_decile_fire_share"):
+        value = metrics.get(key)
+        if isinstance(value, (int, float)) and math.isfinite(float(value)):
+            clean[key] = float(value)
+    return clean
+
+
+def metric_drift(
+    recorded: Mapping[str, Any],
+    current: Mapping[str, Any],
+    *,
+    tolerance: float = 1e-9,
+) -> pd.DataFrame:
+    """Compare the model-card snapshot with the reproducible evaluation.
+
+    Returns one row per shared metric. A row is marked ``changed`` when the two
+    values differ beyond ``tolerance``; the raw delta is kept for plotting or
+    sorting. Metrics missing from either side are skipped.
+    """
+    rows: list[dict[str, Any]] = []
+    for key, label, template in DRIFT_METRICS:
+        if key not in recorded or key not in current:
+            continue
+        try:
+            old = float(recorded[key])
+            new = float(current[key])
+        except (TypeError, ValueError):
+            continue
+        if not (math.isfinite(old) and math.isfinite(new)):
+            continue
+        rows.append(
+            {
+                "metric": label,
+                "model_card": template.format(old),
+                "reproducible": template.format(new),
+                "delta": new - old,
+                "changed": not math.isclose(old, new, rel_tol=tolerance, abs_tol=tolerance),
+            }
+        )
+    return pd.DataFrame(
+        rows,
+        columns=["metric", "model_card", "reproducible", "delta", "changed"],
+    )
