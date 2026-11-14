@@ -25,7 +25,7 @@ def load_raw() -> pd.DataFrame:
             "for your study area and date range, then save it at this path."
         )
     
-    raw = pd.read_csv("E:/CS/Projects/Data Mining/fire-risk-prediction/data/raw/firms_raw.csv")
+    raw = pd.read_csv(FIRMS_RAW)
     year = raw["acq_date"].str[:4]
     print(raw.groupby(year).size())                         # detections per year, raw
     print(raw[raw["type"].isna()].groupby(year).size())     # rows with missing type
