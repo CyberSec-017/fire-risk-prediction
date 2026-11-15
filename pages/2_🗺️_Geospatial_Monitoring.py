@@ -442,7 +442,7 @@ else:
         st.write(f"Displaying top 500 records from the currently filtered {total_fire_records:,} fire-day observations.")
         st.dataframe(
             filtered_fires.sort_values("date", ascending=False).head(500),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
         csv_payload = filtered_fires.to_csv(index=False).encode("utf-8")

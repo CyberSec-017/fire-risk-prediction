@@ -76,6 +76,7 @@ def generate_tiles(lat_min=LAT_MIN, lat_max=LAT_MAX,
 ROOT = Path(__file__).resolve().parent.parent
 
 RAW_DIR = ROOT / "data" / "raw"
+
 POWER_CACHE = RAW_DIR / "power_cache"
 FIRMS_RAW = RAW_DIR / "firms_raw.csv"
 
@@ -84,6 +85,8 @@ FIRES_DAILY = INTERIM_DIR / "fires_daily.parquet"
 
 PROCESSED_DIR = ROOT / "data" / "processed"
 FIRE_PANEL = PROCESSED_DIR / "fire_panel.parquet"
+
+IMPACT_DIR = ROOT / "data" / "impact" 
 
 for d in (RAW_DIR, POWER_CACHE, INTERIM_DIR, PROCESSED_DIR):
     d.mkdir(parents=True, exist_ok=True)

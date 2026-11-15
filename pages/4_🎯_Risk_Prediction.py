@@ -111,7 +111,7 @@ col_p1, col_p2, col_p3 = st.columns(3)
 preset_data = None
 
 with col_p1:
-    if st.button("Summer Heatwave Scenario (High Threat)", use_container_width=True):
+    if st.button("Summer Heatwave Scenario (High Threat)", width="stretch"):
         preset_data = {
             "T2M": 38.0, "T2M_MAX": 43.5, "RH2M": 15.0, "WS2M": 8.5,
             "PRECTOTCORR": 0.0, "ALLSKY_SFC_SW_DWN": 29.5, "GWETROOT": 0.12,
@@ -122,7 +122,7 @@ with col_p1:
         }
 
 with col_p2:
-    if st.button("Spring Intermediate Scenario (Moderate)", use_container_width=True):
+    if st.button("Spring Intermediate Scenario (Moderate)", width="stretch"):
         preset_data = {
             "T2M": 21.5, "T2M_MAX": 26.8, "RH2M": 46.0, "WS2M": 4.2,
             "PRECTOTCORR": 0.6, "ALLSKY_SFC_SW_DWN": 20.5, "GWETROOT": 0.44,
@@ -133,7 +133,7 @@ with col_p2:
         }
 
 with col_p3:
-    if st.button("Winter Wet Scenario (Low Threat)", use_container_width=True):
+    if st.button("Winter Wet Scenario (Low Threat)", width="stretch"):
         preset_data = {
             "T2M": 10.5, "T2M_MAX": 14.0, "RH2M": 84.0, "WS2M": 5.0,
             "PRECTOTCORR": 16.5, "ALLSKY_SFC_SW_DWN": 10.0, "GWETROOT": 0.86,
@@ -369,7 +369,7 @@ st.markdown(
 st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
 run_predict = st.button(
     "Evaluate Wildfire Risk",
-    use_container_width=True,
+    width="stretch",
     disabled=model_state == "ERROR",
 )
 

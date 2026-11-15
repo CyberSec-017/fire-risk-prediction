@@ -47,8 +47,10 @@ def line_with(text: str, prefix: str) -> str:
     raise AssertionError(f"Could not find {prefix!r} in page output.")
 
 
-def test_page_loads_when_impact_data_is_absent():
-    app = run_page()
+def test_page_loads_when_impact_data_is_absent(tmp_path):
+    # Point the page at an empty directory so the test stays valid whether or
+    # not the repository ships built impact artifacts.
+    app = run_page(tmp_path)
 
     assert not app.exception
     assert [tab.label for tab in app.tabs] == TAB_LABELS
