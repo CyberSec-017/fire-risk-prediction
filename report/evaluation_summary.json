@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-14T08:11:27+00:00",
+  "generated_at": "2026-11-15T11:28:19+00:00",
   "project": "FIREWATCH AI \u2014 Wildfire Risk Prediction",
   "study_area": "Northern Algeria (32.0\u201337.5\u00b0N, -2.0\u20139.0\u00b0E)",
   "model": {
@@ -80,8 +80,8 @@
     "brier": 0.03617751569854039,
     "brier_skill": 0.12529848981115865,
     "ece": 0.005061660948683507,
-    "calibration_slope": 0.880811172899815,
-    "calibration_intercept": -0.34099935161066586,
+    "calibration_slope": 0.8808111728998116,
+    "calibration_intercept": -0.3409993516106711,
     "top_decile_fire_share": 0.5050126582278481,
     "climatology_pr_auc": 0.20655479983735886,
     "climatology_brier": 0.041719429928166754,
@@ -141,7 +141,7 @@
       "pr_auc_model": 0.29598808751876715,
       "pr_auc_climatology": 0.25401973834133956,
       "brier": 0.037912311360869,
-      "top_decile_share": 0.5454795273426766
+      "top_decile_share": 0.5501511404231931
     },
     {
       "year": 2023,
@@ -150,7 +150,7 @@
       "pr_auc_model": 0.2606649405973301,
       "pr_auc_climatology": 0.21749503388792818,
       "brier": 0.038829412633550026,
-      "top_decile_share": 0.5006942515967787
+      "top_decile_share": 0.5001388503193558
     },
     {
       "year": 2024,
@@ -159,7 +159,7 @@
       "pr_auc_model": 0.17320483744013723,
       "pr_auc_climatology": 0.15103558409347603,
       "brier": 0.031766653995982636,
-      "top_decile_share": 0.44364326375711577
+      "top_decile_share": 0.44060721062618596
     }
   ],
   "permutation_importance": [
