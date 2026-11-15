@@ -1,0 +1,341 @@
+/* ==========================================================================
+   FIREWATCH AI — UI V2 THEME STYLESHEET (Geoaether & Environmental Intelligence)
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+/* ── Global Canvas & Typography ── */
+:root {
+    --bg-workspace: #F8FAFC;
+    --bg-surface: #FFFFFF;
+    --bg-surface-elevated: #FFFFFF;
+    --border-subtle: #E2E8F0;
+    --border-medium: #CBD5E1;
+    --text-primary: #0F172A;
+    --text-secondary: #475569;
+    --text-muted: #94A3B8;
+    --brand-primary: #0D9488;
+    --brand-dark: #0F766E;
+    --brand-light: #CCFBF1;
+    --accent-orange: #EA580C;
+    --accent-orange-light: #FFEDD5;
+    --risk-low: #16A34A;
+    --risk-low-bg: #DCFCE7;
+    --risk-moderate: #CA8A04;
+    --risk-moderate-bg: #FEF9C3;
+    --risk-high: #EA580C;
+    --risk-high-bg: #FFEDD5;
+    --risk-extreme: #DC2626;
+    --risk-extreme-bg: #FEE2E2;
+    --shadow-sm: 0 1px 2px 0 rgba(15, 23, 42, 0.05);
+    --shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.08), 0 2px 4px -2px rgba(15, 23, 42, 0.04);
+    --shadow-lg: 0 10px 15px -3px rgba(15, 23, 42, 0.08), 0 4px 6px -4px rgba(15, 23, 42, 0.04);
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-full: 9999px;
+}
+
+html, body, [class*="css"] {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    color: var(--text-primary);
+}
+
+.stApp {
+    background-color: var(--bg-workspace) !important;
+}
+
+/* ── Level 1: Welcome & Hero Container ── */
+.fwx-hero-container {
+    background: linear-gradient(135deg, #0F172A 0%, #1E293B 60%, #0F172A 100%);
+    border: 1px solid #334155;
+    border-radius: 18px;
+    padding: 60px 48px;
+    text-align: center;
+    color: #FFFFFF;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 20px 35px -10px rgba(15, 23, 42, 0.35);
+    margin-top: 10px;
+    margin-bottom: 24px;
+}
+
+.fwx-hero-container::before {
+    content: "";
+    position: absolute;
+    top: -40%;
+    left: 30%;
+    width: 450px;
+    height: 450px;
+    background: radial-gradient(circle, rgba(234, 88, 12, 0.15) 0%, rgba(13, 148, 136, 0.08) 50%, transparent 70%);
+    pointer-events: none;
+}
+
+.fwx-hero-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    color: #94A3B8;
+    font-size: 0.76rem;
+    font-weight: 700;
+    padding: 6px 16px;
+    border-radius: var(--radius-full);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 20px;
+}
+
+.fwx-pulse-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: #10B981;
+    display: inline-block;
+    box-shadow: 0 0 8px #10B981;
+}
+
+.fwx-hero-brand {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.fwx-hero-title {
+    font-size: 2.2rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: #FFFFFF;
+}
+
+.fwx-hero-headline {
+    font-size: 3.4rem !important;
+    font-weight: 900 !important;
+    letter-spacing: -0.03em !important;
+    color: #FFFFFF !important;
+    margin: 16px 0 !important;
+    line-height: 1.1 !important;
+    background: linear-gradient(180deg, #FFFFFF 30%, #CBD5E1 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.fwx-hero-sub {
+    font-size: 1.05rem;
+    color: #94A3B8;
+    max-width: 740px;
+    margin: 0 auto 10px auto;
+    line-height: 1.6;
+    font-weight: 400;
+}
+
+/* ── Level 1: 3-Pillar Feature Cards ── */
+.fwx-feature-card {
+    background: #FFFFFF;
+    border: 1px solid var(--border-subtle);
+    border-radius: 14px;
+    padding: 24px 22px;
+    box-shadow: var(--shadow-sm);
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    height: 100%;
+}
+
+.fwx-feature-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 20px -5px rgba(15, 23, 42, 0.08);
+    border-color: #CBD5E1;
+}
+
+.fwx-feature-icon {
+    font-size: 2.0rem;
+    margin-bottom: 14px;
+}
+
+.fwx-feature-title {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: #0F172A;
+    margin-bottom: 8px;
+    letter-spacing: -0.01em;
+}
+
+.fwx-feature-text {
+    font-size: 0.84rem;
+    color: #475569;
+    line-height: 1.55;
+}
+
+/* ── Modern Card Container ── */
+.fwx-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow 0.2s ease, border-color 0.2s ease;
+    margin-bottom: 16px;
+}
+
+.fwx-card:hover {
+    box-shadow: var(--shadow-md);
+    border-color: var(--border-medium);
+}
+
+/* ── Dialog / Modal Improvements ── */
+div[role="dialog"] {
+    border-radius: var(--radius-lg) !important;
+    border: 1px solid var(--border-medium) !important;
+    box-shadow: var(--shadow-lg) !important;
+}
+
+/* ── Buttons ── */
+button[kind="primary"] {
+    background: linear-gradient(135deg, #EA580C, #C2410C) !important;
+    color: #FFFFFF !important;
+    font-weight: 700 !important;
+    border: none !important;
+    border-radius: 8px !important;
+    padding: 0.5rem 1.2rem !important;
+    box-shadow: 0 4px 10px rgba(234, 88, 12, 0.25) !important;
+    transition: all 0.2s ease !important;
+}
+
+button[kind="primary"]:hover {
+    box-shadow: 0 6px 14px rgba(234, 88, 12, 0.35) !important;
+    transform: translateY(-1px) !important;
+}
+
+/* ==========================================================================
+   SIDEBAR THEME & NAVIGATION (Enterprise Dark Palette & High-Contrast Blue)
+   ========================================================================== */
+
+/* ── Sidebar Canvas & Container ── */
+section[data-testid="stSidebar"],
+[data-testid="stSidebar"] > div:first-child {
+    background-color: #0F172A !important;
+    border-right: 1px solid #334155 !important;
+}
+
+section[data-testid="stSidebar"] [data-testid="stSidebarContent"],
+section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"],
+section[data-testid="stSidebar"] [data-testid="stSidebarHeader"] {
+    background-color: #0F172A !important;
+}
+
+/* ── Sidebar Collapse & Expand Controls ── */
+section[data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"] button,
+button[data-testid="stSidebarCollapsedControl"],
+section[data-testid="stSidebar"] button[kind="header"] {
+    color: #94A3B8 !important;
+    background-color: transparent !important;
+}
+
+section[data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"] button:hover,
+button[data-testid="stSidebarCollapsedControl"]:hover,
+section[data-testid="stSidebar"] button[kind="header"]:hover {
+    color: #F8FAFC !important;
+    background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* ── Sidebar Navigation Container ── */
+[data-testid="stSidebarNav"] {
+    background-color: transparent !important;
+    padding-top: 6px !important;
+    padding-bottom: 6px !important;
+}
+
+[data-testid="stSidebarNavSeparator"] {
+    border-color: #334155 !important;
+    opacity: 0.6;
+}
+
+/* ── Inactive Navigation Links ── */
+[data-testid="stSidebarNavLink"] {
+    background-color: transparent !important;
+    border-radius: 8px !important;
+    padding: 8px 12px !important;
+    margin: 2px 0 !important;
+    border-left: 3px solid transparent !important;
+    transition: all 0.15s ease-in-out !important;
+}
+
+[data-testid="stSidebarNavLink"] span,
+[data-testid="stSidebarNavLink"] p,
+[data-testid="stSidebarNavLink"] div {
+    color: #94A3B8 !important;
+    font-size: 0.88rem !important;
+    font-weight: 500 !important;
+}
+
+/* ── Hover State ── */
+[data-testid="stSidebarNavLink"]:hover {
+    background-color: rgba(255, 255, 255, 0.06) !important;
+    border-left-color: rgba(56, 189, 248, 0.5) !important;
+}
+
+[data-testid="stSidebarNavLink"]:hover span,
+[data-testid="stSidebarNavLink"]:hover p,
+[data-testid="stSidebarNavLink"]:hover div {
+    color: #F8FAFC !important;
+}
+
+/* ── Active / Selected Navigation Link (Accent Bleu Élégant) ── */
+[data-testid="stSidebarNavLink"][aria-current="page"],
+[data-testid="stSidebarNavLink"].st-emotion-cache-h7cl5v {
+    background: linear-gradient(90deg, rgba(14, 165, 233, 0.20) 0%, rgba(37, 99, 235, 0.10) 100%) !important;
+    border-left: 3px solid #38BDF8 !important;
+    border-radius: 8px !important;
+}
+
+[data-testid="stSidebarNavLink"][aria-current="page"] span,
+[data-testid="stSidebarNavLink"][aria-current="page"] p,
+[data-testid="stSidebarNavLink"][aria-current="page"] div,
+[data-testid="stSidebarNavLink"].st-emotion-cache-h7cl5v span,
+[data-testid="stSidebarNavLink"].st-emotion-cache-h7cl5v p,
+[data-testid="stSidebarNavLink"].st-emotion-cache-h7cl5v div {
+    color: #38BDF8 !important;
+    font-weight: 700 !important;
+}
+
+/* ── Focus & Keyboard Accessibility ── */
+[data-testid="stSidebarNavLink"]:focus,
+[data-testid="stSidebarNavLink"]:focus-visible,
+section[data-testid="stSidebar"] a:focus-visible,
+section[data-testid="stSidebar"] button:focus-visible {
+    outline: 2px solid #38BDF8 !important;
+    outline-offset: 2px !important;
+}
+
+/* ── Sidebar General Typography & Form Controls ── */
+section[data-testid="stSidebar"] .stMarkdown p,
+section[data-testid="stSidebar"] .stMarkdown span,
+section[data-testid="stSidebar"] label {
+    color: #94A3B8 !important;
+}
+
+section[data-testid="stSidebar"] .stMarkdown h1,
+section[data-testid="stSidebar"] .stMarkdown h2,
+section[data-testid="stSidebar"] .stMarkdown h3 {
+    color: #F8FAFC !important;
+    font-weight: 700 !important;
+}
+
+section[data-testid="stSidebar"] hr {
+    border-color: #334155 !important;
+    opacity: 0.6;
+}
+
+/* ── Clean Map Styling: Suppress scale bar and technical attributions under the map ── */
+.leaflet-control-attribution,
+.leaflet-control-scale,
+.leaflet-bottom.leaflet-right,
+.leaflet-bottom.leaflet-left .leaflet-control-scale {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    height: 0 !important;
+    pointer-events: none !important;
+}
