@@ -16,8 +16,10 @@ The project integrates data from [NASA FIRMS](https://firms.modaps.eosdis.nasa.g
 - [Data Sources](#data-sources)
 - [Data Processing Pipeline](#data-processing-pipeline)
 - [Machine Learning Model](#machine-learning-model)
+- [Experimental Feature Engineering V2](#experimental-feature-engineering-v2)
 - [Application Modules](#application-modules)
 - [Prediction-First Landing Page](#prediction-first-landing-page)
+- [Next-Generation Interface — FireWatch AI UI V2](#next-generation-interface--firewatch-ai-ui-v2)
 - [Wildfire Impact Assessment](#wildfire-impact-assessment)
 - [Model Evaluation Notebook](#model-evaluation-notebook)
 - [Project Structure](#project-structure)
@@ -69,7 +71,7 @@ The project is organized around the following objectives:
 
 ## System Architecture
 
-The project follows a modular architecture separating data processing, model development, application logic, visualization, and impact assessment.
+The project follows a modular architecture separating data processing, feature engineering, model development, application logic, visualization, and impact assessment.
 
 ```text
                   EXTERNAL DATA SOURCES
@@ -81,33 +83,35 @@ The project follows a modular architecture separating data processing, model dev
                  └──────────┬──────────┘
                             │
                             ▼
-                   DATA PREPROCESSING
+                    DATA PREPROCESSING
                             │
                             ▼
                    DATASET CONSTRUCTION
                             │
                             ▼
                     FEATURE ENGINEERING
-                            │
-                            ▼
-                   MACHINE LEARNING MODEL
-                            │
-                            ▼
-                    PREDICTION ENGINE
-                            │
-             ┌──────────────┴──────────────┐
-             │                             │
-             ▼                             ▼
-       STREAMLIT DASHBOARD          IMPACT ASSESSMENT
-             │                             │
-             ▼                             ▼
-       Risk visualization          Population exposure
-       Historical analysis         Infrastructure exposure
-       Geospatial monitoring       Impact indicators
+            ┌───────────────┴───────────────┐
+            │                               │
+            ▼                               ▼
+    Production Baseline            Experimental Features V2
+    (20 core features)             (12 new: VPD, Anomalies, Indices, Neighbors)
+            │                               │
+            ▼                               ▼
+    Calibrated Production Model     Offline Benchmarking & Analysis
+    (HistGradientBoostingClassifier) (src/compare_features_v2.py)
+            │
+            ▼
+     PREDICTION ENGINE (app_core.py)
+            │
+    ┌───────┴───────────────────────┬────────────────────────┐
+    ▼                               ▼                        ▼
+LEGACY STREAMLIT (app.py)     NEXT-GEN UI V2 (app_v2.py)  IMPACT ASSESSMENT
+- Prediction-first landing    - Level 1: Executive Landing- Population exposure
+- Multi-page analytical views - Level 2: Satellite Cockpit- Infrastructure exposure
+                              - 209 active grid cells     - Impact indicators
 ```
 
-The impact-assessment module is intentionally separated from the predictive model. It consumes geographical and population-related information without modifying the trained model or its feature contract.
-
+The impact-assessment module is intentionally separated from the predictive model. It consumes geographical and population-related information without modifying the trained model or its feature contract. Similarly, the experimental Feature Engineering V2 framework and the next-generation UI V2 interface operate alongside the core production pipelines without altering the deployed 20-feature contract or legacy application flows.
 ---
 
 ## Data Sources
@@ -315,6 +319,136 @@ These results should be interpreted in the context of a highly imbalanced classi
 
 ---
 
+## Experimental Feature Engineering V2
+
+To investigate whether enhanced physical, climatological, and spatial representations can improve wildfire risk estimation, an advanced experimental feature engineering framework is implemented in `src/features_v2.py`.
+
+The system retains the authoritative 20 baseline features of the production contract and introduces **12 new candidate features** grouped into four scientific families.
+
+### Feature Families
+
+```text
+                               12 NEW EXPERIMENTAL FEATURES
+                                             │
+      ┌──────────────────────┬───────────────┴──────────────┬─────────────────────────┐
+      ▼                      ▼                              ▼                         ▼
+Vapor Pressure Deficit  Temperature Anomalies         Fire-Weather Indices      Neighbor Fire History
+(Magnus-Tetens)         (Causal & Climatological)     (Empirical Fire Danger)   (NASA FIRMS Spatial Lag)
+- vpd                   - tmax_anomaly_30d            - angstrom_proxy          - neighbor_fires_7d
+- vpd_tmax_proxy        - t2m_anomaly_hist            - cbi                     - neighbor_fires_14d
+                        - t2m_zscore_hist             - hdw_proxy               - neighbor_fires_30d
+                                                      - nesterov_proxy
+```
+
+#### A. Vapor Pressure Deficit (VPD)
+
+Vapor Pressure Deficit (VPD) quantifies the drying power of the atmosphere by measuring the difference between saturation vapor pressure $e_s(T)$ and actual vapor pressure $e_a(T, \text{RH})$. Formulations use the Magnus-Tetens approximation (Murray 1967; Allen et al. 1998, FAO-56):
+
+- `vpd`: Daily mean Vapor Pressure Deficit (in kPa) derived from daily mean temperature (`T2M`) and relative humidity (`RH2M`).
+- `vpd_tmax_proxy`: Estimated daytime peak VPD combining daily maximum temperature (`T2M_MAX`) with daily mean relative humidity (`RH2M`). **Note:** This variable serves as an empirical proxy for peak daytime atmospheric dryness; it is not an instantaneous physical measurement captured at the exact moment of daily maximum temperature.
+
+#### B. Temperature Anomalies
+
+These features capture both acute short-term heat stress and long-term departure from local climatological baselines:
+
+- `tmax_anomaly_30d`: Daily maximum temperature (`T2M_MAX`) minus the antecedent 30-day rolling mean of `T2M_MAX` (computed with a 1-day shift to strictly exclude day $t$). It identifies acute heatwave spikes relative to recent local weather $[t-30, t-1]$.
+- `t2m_anomaly_hist`: Difference between daily mean temperature (`T2M`) and the historical monthly mean for that grid cell and calendar month, computed strictly across prior years ($Y' < Y$). Evaluates to `NaN` when no prior reference years exist (e.g., year 2018).
+- `t2m_zscore_hist`: Standardized temperature anomaly relative to historical years ($Y' < Y$). Requires at least two prior reference years ($n \ge 2$) and strictly positive standard deviation ($\sigma > 0$); evaluates to `NaN` otherwise.
+
+#### C. Fire-Weather Indices
+
+Four empirical fire danger indicators adapted to daily gridded reanalysis:
+
+- `angstrom_proxy`: Daily adaptation of the Swedish Ångström fire risk index:
+  $$I = \frac{\text{RH2M}}{20.0} + \frac{27.0 - \text{T2M}}{10.0}$$
+  Lower values denote higher danger ($I < 2.0$ signifies very high fire hazard). **Note:** Adapted to daily aggregated means rather than standard 13:00 local time readings.
+- `cbi`: Chandler Burning Index metric daily adaptation based on Chandler et al. (1983):
+  $$\text{CBI} = \frac{(104.5 - 1.373 \cdot \text{RH2M} + 0.54 \cdot \text{T2M}) \cdot 124 \cdot 10^{-0.0142 \cdot \text{RH2M}}}{60}$$
+  Floored at $0.0$ to ensure non-negative fire potential.
+- `hdw_proxy`: Surface Hot-Dry-Windy proxy calculated as $\text{VPD} \times \text{WS2M}$ (in $\text{kPa} \cdot \text{m/s}$). **Note:** Evaluated using 2-meter surface wind observations, whereas the original atmospheric HDW index (Srock et al., 2018) integrates wind and moisture across the 500-meter planetary boundary layer.
+- `nesterov_proxy`: Cumulative Nesterov drought-combustion index (Nesterov, 1949). Daily increments $\Delta NI = \max(\text{T2M} \cdot (\text{T2M} - T_{\text{dew}}), 0)$ (for $\text{T2M} > 0$) accumulate sequentially and reset to $0.0$ on days with significant precipitation ($\text{PRECTOTCORR} \ge 3.0\text{ mm}$). Prior to the first valid $\ge 3.0\text{ mm}$ rain reset in a cell's sequence, the value evaluates to `NaN`.
+
+#### D. Spatial-Temporal Fire History
+
+Wildfire propagation and regional fire activity exhibit strong spatial autocorrelation. These variables capture satellite-confirmed active fire detections in the neighborhood:
+
+- `neighbor_fires_7d`: Cumulative NASA FIRMS active fire counts across the 8 spatial Moore neighbors of the grid cell over the preceding 7 days $[t-7, t-1]$.
+- `neighbor_fires_14d`: Cumulative FIRMS active fire counts across the 8 neighbors over the preceding 14 days $[t-14, t-1]$.
+- `neighbor_fires_30d`: Cumulative FIRMS active fire counts across the 8 neighbors over the preceding 30 days $[t-30, t-1]$.
+
+### Methodological Guarantees
+
+The implementation in `src/features_v2.py` adheres to strict mathematical and causal validation guarantees:
+
+- **Rolling-window leakage prevention:** Rolling windows (such as `tmax_anomaly_30d` and neighbor fire history counts) apply `shift(1)` to strictly exclude the prediction day $t$, ensuring features consume only antecedent observations $[t-k, t-1]$.
+- **Historical climatology leakage prevention:** Historical monthly means and standard deviations (`t2m_anomaly_hist`, `t2m_zscore_hist`) are calculated exclusively from strictly preceding years ($Y' < Y$) for the corresponding cell and calendar month. Prior-year climatological baselines do not use `shift(1)`; they enforce temporal separation by filtering out the current year and all future years.
+- **Explicit missingness:** Incomplete historical windows (e.g., initial observation year 2018 where no prior years exist, or periods before precipitation resets) produce explicit `NaN` values, preserving genuine missingness for tree models.
+- **Target independence:** The feature engineering routines never inspect the target variable (`target` or fire labels), guaranteeing total causal purity.
+- **Data immutability:** All transformation functions operate on defensive dataframe copies, preserving row order, original indices, and exact row counts.
+
+---
+
+### Comparative Experimental Study
+
+An extensive comparative benchmarking experiment was executed via `src/compare_features_v2.py` using `HistGradientBoostingClassifier` with tuned hyperparameters (`learning_rate=0.03`, `max_depth=8`, `max_iter=150`, `min_samples_leaf=100`, `l2_regularization=0.1`).
+
+Six distinct feature configurations were evaluated:
+
+| Configuration | Features | Description |
+|---|---:|---|
+| A — Baseline | 20 | Original production feature set |
+| B — Baseline + VPD | 22 | Baseline plus two VPD features |
+| C — Baseline + Anomalies | 23 | Baseline plus three temperature anomaly features |
+| D — Baseline + Indices | 24 | Baseline plus four fire-weather indicators |
+| E — Baseline + Neighbors | 23 | Baseline plus three neighboring-fire history features |
+| F — All Families | 32 | Baseline plus all 12 experimental features |
+
+#### Experimental Protocol
+
+The evaluation adheres to a rigorous chronological validation protocol:
+
+| Partition | Period | Rows |
+|---|---|---:|
+| Training | 2018-03-02 to 2021-12-28 | 292,182 |
+| Validation | 2022-01-01 to 2022-12-28 | 75,658 |
+| Test | 2023–2024 | Excluded from this experiment |
+
+Key protocol rules:
+
+- **Strictly identical partitions:** Training and validation splits are identical in size and temporal bounds across all six configurations.
+- **Chronological purge gap:** A 3-day purge gap is enforced between time partitions to reflect the 3-day prediction horizon and eliminate boundary leakage.
+- **Continuous pre-test panel:** In `src/compare_features_v2.py`, `load_and_prepare_continuous_panel()` loads the panel dataset and filters out the test period ($date \le 2022\text{-}12\text{-}28$) prior to feature computation. Feature transformations are computed continuously across this pre-test panel to preserve rolling-lag continuity across the training-validation purge boundary.
+- **Out-of-Fold threshold selection:** Decision thresholds are selected exclusively on the Training partition using 5-fold chronological expanding-window splits with a 3-day purge gap to maximize F1-score.
+- **Frozen threshold evaluation:** Selected thresholds are frozen and evaluated out-of-sample on the 2022 Validation partition.
+- **Test partition exclusion:** Observations from 2023–2024 are strictly excluded from experimental feature construction, model training, Out-of-Fold threshold selection, and validation evaluation.
+- **Evaluation metrics:** Precision-Recall AUC (PR-AUC, primary metric for imbalanced fire classification), ROC-AUC, Brier Score, Precision, Recall, and F1-score.
+
+#### Experimental Results
+
+| Configuration | PR-AUC | ROC-AUC | Brier Score | OOF Threshold | F1 |
+|---|---:|---:|---:|---:|---:|
+| A — Baseline | 0.3103 | 0.8945 | 0.0396 | 0.2094 | 0.3446 |
+| B — VPD | 0.3114 | 0.8944 | 0.0395 | 0.1929 | 0.3486 |
+| C — Anomalies | 0.3118 | 0.8929 | 0.0393 | 0.2244 | 0.3474 |
+| D — Indices | 0.3090 | 0.8946 | 0.0396 | 0.2174 | 0.3492 |
+| E — Neighbors | 0.3146 | 0.8934 | 0.0388 | 0.1984 | 0.3403 |
+| F — All Families | **0.3159** | 0.8920 | **0.0386** | 0.2057 | 0.3436 |
+
+#### Scientific Analysis & Production Safeguards
+
+1. **Ranking & calibration gains:** Configuration F (incorporating all 12 experimental features) achieves the highest PR-AUC (**0.3159** vs. 0.3103 for the baseline), representing a **+1.81% relative improvement**. It also achieves the best probability calibration with the lowest Brier Score (**0.0386** vs. 0.0396).
+2. **Metric trade-offs:** Configuration D achieves the highest F1-score (**0.3492** vs. 0.3446), while Configuration A retains a slightly higher ROC-AUC (0.8945 vs. 0.8920). These nuances illustrate that individual evaluation metrics do not all improve simultaneously.
+3. **Mandatory scientific caution:** These findings represent **offline validation results** on the 2022 partition. They are not final test results, nor do they represent an immediate change to the deployed model.
+4. **Production stability:** The deployed production model strictly preserves its 20-feature contract (`models/model_card.json`) until an official validation, integrity verification, and deployment approval cycle is completed.
+
+**Experiment deliverables:**
+- Code implementation: `src/features_v2.py`
+- Evaluation pipeline: `src/compare_features_v2.py`
+- Comparative benchmark metrics: `results/feature_engineering_v2_comparison.csv`
+- Experiment metadata and parameters: `results/feature_engineering_v2_metadata.json`
+
+---
+
 ## Application Modules
 
 The interactive application is built using Streamlit.
@@ -443,6 +577,94 @@ readable disabled controls, callouts announced through `role="alert"` /
 
 ---
 
+## Next-Generation Interface — FireWatch AI UI V2
+
+In addition to the legacy prediction dashboard (`app.py`), the platform introduces **FireWatch AI UI V2**, a next-generation analytical interface designed for operational monitoring, interactive geospatial exploration, and decision-support.
+
+UI V2 is implemented under `ui_v2/` with its dedicated master entry point in `app_v2.py`. It operates independently without altering or replacing the legacy application.
+
+```text
+                               FIREWATCH AI UI V2 ARCHITECTURE
+                                              │
+                      ┌───────────────────────┴───────────────────────┐
+                      ▼                                               ▼
+            LEVEL 1: LANDING PAGE                           LEVEL 2: DASHBOARD
+           "Understand. Monitor. Predict."           (Interactive Geographical Cockpit)
+           ui_v2/landing.py                          ui_v2/dashboard_view.py
+                      │                                               │
+                      └───────────────────────┬───────────────────────┘
+                                              │
+                     ┌────────────────────────┴────────────────────────┐
+                     ▼                                                 ▼
+          COMPONENTS & STATE                                ANALYTICAL VIEWS
+          - Satellite map (satellite_map.py)                - Overview (overview.py)
+          - 209-cell context (point_context.py)             - Historical (historical.py)
+          - Prediction modal (prediction_modal.py)          - Weather (weather.py)
+          - Geoaether theme (styles/theme.css)              - Risk Map (risk_map.py)
+          - Master navigation (navbar.py & sidebar.py)      - Predictions Cockpit (fire_predictions.py)
+                                                            - About & Attributions (about.py)
+```
+
+### Two-Level Architecture
+
+UI V2 organizes the user journey into two distinct operational levels:
+
+#### Level 1 — Professional Welcome & Landing Page
+
+- **File:** `ui_v2/landing.py`
+- **Core concept:** *"Understand. Monitor. Predict."*
+- Serves as the executive gateway to the platform, articulating the platform's mission, scientific foundations, and active coverage domain.
+- Provides high-level feature highlights and a direct call-to-action button to enter the interactive dashboard.
+
+#### Level 2 — Interactive Geographical Dashboard
+
+- **File:** `ui_v2/dashboard_view.py`
+- An interactive operational environment centered on Northern Algeria:
+  - **209 active geographic grid cells:** Defined and indexed via `ui_v2/components/point_context.py`. Filters out non-computational maritime areas in the Mediterranean and deep unpopulated Sahara cells to focus strictly on fire-vulnerable land mass.
+  - **Dual-basemap interactive map:** Powered by Folium with seamless switching between Esri World Imagery (high-resolution satellite) and OpenStreetMap (cartographic/street basemap). Bottom technical controls (attribution/scale clutter) are cleanly suppressed for interface elegance, while full legal attributions are preserved in the About page.
+  - **Synchronized location context:** Clicking on any grid cell or entering coordinates instantly snaps to the model grid and updates local contextual metadata (Wilaya name, elevation, historical fire statistics, and risk band).
+  - **Interactive fire prediction dialog:** A dedicated modal dialog (`ui_v2/components/prediction_modal.py`) supporting both manual feature simulation and live meteorological fetching from NASA POWER.
+  - **Immediate history synchronization:** Predictions executed inside the modal are immediately written to `st.session_state["prediction_history"]` and rendered instantly in the prediction log and map without requiring manual page reloads.
+
+#### Dedicated Analytical Pages
+
+Level 2 provides six specialized analytical cockpit views accessible via the horizontal navbar (`ui_v2/navbar.py`) and dark enterprise sidebar (`ui_v2/sidebar.py`):
+
+1. **Executive Overview (`ui_v2/pages/overview.py`):** Macro KPIs, seasonal fire distribution, and overall risk summary.
+2. **Historical Detections (`ui_v2/pages/historical.py`):** Multi-year NASA FIRMS fire detections, temporal trends, and fire radiative power analysis.
+3. **Meteorological Monitoring (`ui_v2/pages/weather.py`):** Weather variable distributions, drought tracking, and climate anomalies.
+4. **Spatial Risk Distribution (`ui_v2/pages/risk_map.py`):** Gridded risk heatmaps, regional exposure indices, and territorial fire risk mapping.
+5. **Fire Predictions Cockpit (`ui_v2/pages/fire_predictions.py`):** Standalone satellite fire risk prediction cockpit for point and batch inference.
+6. **Methodology & About (`ui_v2/pages/about.py`):** Comprehensive model card transparency, mathematical explanations, and legal cartographic attributions.
+
+### Technical Architecture & State Management
+
+- **Master Router (`app_v2.py`):** Routes dynamically between Level 1 and Level 2 based on `st.session_state["app_level"]` (`"landing"` vs. `"dashboard"`).
+- **Sub-Page Navigation:** Within Level 2, pages are activated via `st.session_state["current_page"]` without hard page reloads.
+- **Design System (`ui_v2/styles/theme.css`):** Custom *Geoaether* dark aesthetic with high-contrast typography, refined translucent cards, accessible interactive states, and consistent risk-band color accents.
+- **Modular Components (`ui_v2/components/`):**
+  - `point_context.py`: 209-cell spatial polygon indexing, coordinate snapping, geographic bounding boxes, administrative Wilaya lookup, and pre-test data isolation.
+  - `prediction_modal.py`: Prediction dialog with input validation, scenario overrides, real-time model inference, and instant history synchronization.
+  - `satellite_map.py`: Folium satellite/street map component with responsive click capture and selected marker positioning.
+
+### Coexistence with the Legacy Application
+
+UI V2 is fully non-destructive and runs alongside the legacy interface:
+
+- `app.py` remains the original prediction-first landing page and multi-page application.
+- `app_v2.py` launches the new two-level Geoaether UI V2 experience.
+- Both interfaces share the underlying model bundle (`app_core.py`) and preprocessed panel datasets.
+
+```bash
+# Option 1: Launch legacy prediction-first interface
+python -m streamlit run app.py
+
+# Option 2: Launch next-generation UI V2 interface
+python -m streamlit run app_v2.py
+```
+
+---
+
 ## Wildfire Impact Assessment
 
 The impact-assessment module is implemented independently under `impact/`.
@@ -475,7 +697,7 @@ Detailed instructions, expected filenames, checksums, and processing requirement
 The impact module uses separate build dependencies:
 
 ```bash
-python -m pip install -r requirements-impact.txt
+python -m pip install -r requirements/requirements-impact.txt
 ```
 
 Build the derived layers:
@@ -547,7 +769,8 @@ by `report/build_report.py`.
 ```text
 fire-risk-prediction/
 │
-├── app.py                       # prediction-first landing page
+├── app.py                       # legacy prediction-first landing page
+├── app_v2.py                    # next-generation UI V2 master entry point
 ├── app_core.py                  # model loading, scoring, risk bands
 ├── notebook.py                  # reproducible evaluation script
 │
@@ -557,8 +780,34 @@ fire-risk-prediction/
 │   ├── clean_firms.py
 │   ├── build_panel.py
 │   ├── train_baseline.py
+│   ├── compare_classifiers.py   # multi-model cross-validation benchmark
+│   ├── tune_classifiers.py      # hyperparameter tuning pipeline
 │   ├── evaluate_spatial.py
-│   └── evaluate_rolling.py
+│   ├── evaluate_rolling.py
+│   ├── features_v2.py           # experimental feature engineering V2
+│   └── compare_features_v2.py   # comparative feature evaluation pipeline
+│
+├── ui_v2/                       # next-generation UI V2 application
+│   ├── __init__.py
+│   ├── landing.py               # Level 1: executive welcome & landing page
+│   ├── dashboard_view.py        # Level 2: interactive geographical dashboard
+│   ├── navbar.py                # horizontal navigation bar
+│   ├── sidebar.py               # enterprise dark sidebar
+│   ├── components/
+│   │   ├── __init__.py
+│   │   ├── point_context.py     # 209-cell spatial domain & inference context
+│   │   ├── prediction_modal.py  # interactive prediction modal & history sync
+│   │   └── satellite_map.py     # dual-basemap satellite & street map
+│   ├── pages/
+│   │   ├── __init__.py
+│   │   ├── overview.py          # macro KPIs & seasonal summaries
+│   │   ├── historical.py        # FIRMS historical fire detections
+│   │   ├── weather.py           # meteorological distributions
+│   │   ├── risk_map.py          # spatial risk distribution heatmaps
+│   │   ├── fire_predictions.py  # standalone satellite prediction cockpit
+│   │   └── about.py             # model card & cartographic attributions
+│   └── styles/
+│       └── theme.css            # Geoaether dark theme stylesheet
 │
 ├── dashboard/
 │   ├── config.py
@@ -588,6 +837,13 @@ fire-risk-prediction/
 │   ├── charts.py
 │   └── report.py
 │
+├── results/                     # experimental benchmark deliverables
+│   ├── feature_engineering_v2_comparison.csv
+│   ├── feature_engineering_v2_metadata.json
+│   ├── classifier_comparison.csv
+│   ├── tuned_classifier_comparison.csv
+│   └── best_hyperparameters.json
+│
 ├── scripts/
 │   ├── build_impact_layers.py
 │   └── validate_impact_layers.py
@@ -612,10 +868,24 @@ fire-risk-prediction/
 ├── notebooks/
 │
 ├── tests/
+│   ├── test_app_core.py
+│   ├── test_features_v2.py
+│   ├── test_compare_features_v2.py
+│   ├── test_ui_v2_app.py
+│   ├── test_ui_v2_map_sync.py
+│   ├── test_ui_v2_history_sync.py
+│   ├── test_ui_v2_point_context.py
+│   ├── test_predictor.py
+│   ├── test_dashboard_risk.py
+│   ├── test_components_a11y.py
+│   ├── test_compare_classifiers.py
+│   ├── test_tune_classifiers.py
+│   └── test_impact_*.py
 │
-├── requirements.txt
-├── requirements-impact.txt
-├── requirements-report.txt
+├── requirements/
+│   ├── requirements.txt
+│   ├── requirements-impact.txt
+│   └── requirements-report.txt
 ├── pyproject.toml                 # project metadata + pytest defaults
 ├── DATA_DOWNLOAD.md
 └── README.md
@@ -661,36 +931,54 @@ python -m venv .venv
 ```bash
 python -m pip install --upgrade pip
 
-python -m pip install -r requirements.txt
+python -m pip install -r requirements/requirements.txt
 ```
 
 For geospatial impact-layer construction:
 
 ```bash
-python -m pip install -r requirements-impact.txt
+python -m pip install -r requirements/requirements-impact.txt
 ```
 
 For the PDF report generator:
 
 ```bash
-python -m pip install -r requirements-report.txt
+python -m pip install -r requirements/requirements-report.txt
 ```
 
 ---
 
 ## Running the Project
 
-### Launch the dashboard
+### Launch the Streamlit interfaces
 
-From the repository root:
+The platform provides two independent Streamlit interfaces:
+
+**1. Next-Generation Interface (FireWatch AI UI V2):**
 
 ```bash
-streamlit run app.py
+python -m streamlit run app_v2.py
 ```
 
-Streamlit will provide a local URL for accessing the application. The landing
-page opens on the risk predictor; the analytical pages are available from the
-sidebar.
+Opens the two-level Geoaether experience: Level 1 executive welcome page transitioning into the 209-cell satellite cockpit and interactive dashboard.
+
+**2. Legacy Prediction-First Interface:**
+
+```bash
+python -m streamlit run app.py
+```
+
+Opens the classic prediction-first landing page with guided inputs, sensitivity gauges, and sidebar-accessible analytical pages.
+
+### Run Feature Engineering V2 comparison
+
+Reproduce the 6-configuration experimental feature benchmark:
+
+```bash
+python src/compare_features_v2.py
+```
+
+This evaluates Configurations A through F across the 2018–2021 training and 2022 validation partitions, updating `results/feature_engineering_v2_comparison.csv` and `results/feature_engineering_v2_metadata.json`.
 
 ### Reproduce the model evaluation
 
@@ -745,28 +1033,35 @@ python scripts/validate_impact_layers.py --write-report
 
 ## Testing and Validation
 
-The project includes automated tests to protect important functionality and data integrity.
+The project includes an extensive automated test suite protecting functionality, mathematical correctness, data integrity, and interface behavior.
 
-Run the test suite from the repository root:
+Run the entire test suite from the repository root:
 
 ```bash
 python -m pytest -q
 ```
 
-`pyproject.toml` points a bare `pytest` at `tests/`, so both commands are
-equivalent. The suite currently contains **263 tests**, including end-to-end
-Streamlit `AppTest` runs of the landing page.
+`pyproject.toml` points a bare `pytest` at `tests/`. The full suite comprises **364 collected tests**:
 
-The tests include checks for:
+- **Core & UI V2 test suite (360 passed, 1 skipped):** All core model routines, probability calibration, Feature Engineering V2 (30 tests), next-generation UI V2 workflows (41 tests), classifier cross-validation, and legacy dashboard components pass cleanly under the standard dependencies (`requirements/requirements.txt`).
+- **Geospatial impact build tests (3 failures when running without optional dependencies):** Three offline tests in `tests/test_impact_build_script.py` verify shapefile chunking and road extraction using `geopandas`, `shapely`, and `pyogrio`. In an environment where only core dependencies are installed, these 3 tests fail with `ModuleNotFoundError`, while 1 test is conditionally skipped.
 
-- Model artifact integrity.
-- Feature-contract consistency.
-- Separation between the impact module and the predictive model.
-- Data integrity and missing-data handling.
-- Geospatial processing assumptions.
-- The prediction helpers and the landing-page render.
-- Shareable-link parsing and the JSON export payload.
-- Accessibility contracts of the shared design system (focus, roles, motion).
+To execute the entire 364-test suite with all geospatial impact tests passing, install the optional impact dependencies:
+
+```bash
+python -m pip install -r requirements/requirements-impact.txt
+python -m pytest -q
+```
+
+Coverage areas across the test suite include:
+
+- **Core & Model Integrity:** Artifact checksums, 20-feature contract validation, model loading, and probability calibration (`test_app_core.py`).
+- **Feature Engineering V2 (`test_features_v2.py`, `test_compare_features_v2.py` — 30 tests):** Causal purity, strict non-leakage verification, explicit NaN propagation, historical climatology bounds, and reproducible benchmark pipelines.
+- **Next-Generation UI V2 (`test_ui_v2_*.py` — 41 tests):** Two-level navigation lifecycle (`test_ui_v2_app.py`), Folium click extraction and basemap persistence (`test_ui_v2_map_sync.py`), prediction dialog session history synchronization (`test_ui_v2_history_sync.py`), and 209-cell spatial indexing and context resolution (`test_ui_v2_point_context.py`).
+- **Legacy Prediction Helpers & UI:** Prediction helper contracts (`test_predictor.py`), sensitivity perturbation, risk-band assignment, and AppTest landing-page integration.
+- **Classifier Benchmarking & Hyperparameter Tuning:** Cross-validation splitting with purge gaps, subsampling controls, and fault-tolerant serialization (`test_compare_classifiers.py`, `test_tune_classifiers.py`).
+- **Impact Assessment:** Geospatial boundary integrity, layer building, population exposure weighting, and manifest validation (`test_impact_*.py`).
+- **Accessibility & Design System:** Visible `:focus-visible` styling, screen-reader status announcements, and `prefers-reduced-motion` compliance (`test_components_a11y.py`).
 
 The impact validation script also produces a separate report describing errors, warnings, and successful checks.
 
@@ -833,6 +1128,7 @@ Submit a pull request targeting `main` for review.
 Potential directions for future development include:
 
 - Incorporating additional environmental variables.
+- Validating and potentially deploying high-performing candidate features from Feature Engineering V2 (e.g., Configuration F with VPD, temperature anomalies, and neighbor fire history) after multi-year test evaluation.
 - Improving model calibration and predictive performance.
 - Evaluating generalization across different geographical regions.
 - Integrating additional land-cover and vegetation datasets.
