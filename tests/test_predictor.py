@@ -1,7 +1,7 @@
-"""Tests for the prediction-first UI helpers and the landing page.
+"""Tests for the prediction helpers and the current V2 Streamlit entrypoint.
 
-The helper tests exercise pure logic (no Streamlit); the AppTest smoke test
-executes the real ``app.py`` script end to end.
+The helper tests exercise pure logic (no Streamlit); the AppTest checks run the
+real ``app.py`` script end to end against the UI that is actually deployed.
 """
 
 from __future__ import annotations
@@ -307,7 +307,7 @@ def test_prediction_payload_is_json_serialisable():
 
 
 # ---------------------------------------------------------------------------
-# Landing page smoke test
+# Current Streamlit entrypoint (app.py / UI V2)
 # ---------------------------------------------------------------------------
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
@@ -320,86 +320,61 @@ def run_page() -> AppTest:
     return app
 
 
-def test_landing_page_is_prediction_first():
+def test_landing_page_shows_v2_entrypoint():
     app = run_page()
 
     assert not app.exception, app.exception
-    labels = [button.label for button in app.button]
-    assert any("Predict fire risk" in label for label in labels)
-
-    rendered = "\n".join(item.value for item in app.markdown)
-    assert "Will a fire start here?" in rendered
-    assert "RISK INDEX" in rendered or "Prediction" in rendered
-    assert "Where and when?" in rendered
-    assert "What is the fire weather?" in rendered
+    rendered = " ".join(item.value for item in list(app.markdown) + list(app.html))
+    assert "Understand. Monitor. Predict." in rendered
+    assert "FireWatch" in rendered
+    assert any("Explorer FireWatch AI" in button.label for button in app.button)
 
 
-def test_clicking_predict_shows_probability_and_guidance():
+def test_explore_button_opens_satellite_dashboard():
     app = run_page()
+    explore = next(button for button in app.button if "Explorer FireWatch AI" in button.label)
 
-    button = next(b for b in app.button if "Predict fire risk" in b.label)
-    assert not button.disabled
-    button.click().run()
+    explore.click().run()
 
     assert not app.exception, app.exception
-    rendered = "\n".join(item.value for item in app.markdown)
-    assert "probability of an observed fire" in rendered
-    assert "Recommended actions" in rendered
-    assert "Calibrated model v" in rendered or "Demo heuristic" in rendered
+    assert app.session_state["app_level"] == "dashboard"
+    rendered = " ".join(item.value for item in app.html)
+    assert "Cockpit Satellite" in rendered
+    assert "Position Ciblée" in rendered
 
 
-def test_landing_page_compares_scenarios():
+def test_dashboard_offers_prediction_and_shows_model_provenance():
     app = run_page()
+    app.session_state["app_level"] = "dashboard"
+    app.run()
 
     assert not app.exception, app.exception
-    labels = [expander.label for expander in app.expander]
-    assert any("Compare the four scenarios" in label for label in labels)
-    captions = " ".join(item.value for item in app.caption)
-    assert "isolates how" in captions
-    # The comparison table must expose all four presets at once.
-    tables = [frame.value for frame in app.dataframe]
-    scenario_tables = [table for table in tables if "Scenario" in list(table.columns)]
-    assert scenario_tables
-    assert scenario_tables[0]["Scenario"].tolist() == list(PRESET_ORDER)
+    assert any("Prédire le Risque d'Incendie" in button.label for button in app.button)
+    rendered = " ".join(item.value for item in app.html)
+    assert "Modèle Calibré" in rendered
+    assert "H=3j" in rendered
 
 
-def test_result_stays_stable_and_flags_changed_inputs():
-    import re
-
+def test_coordinate_input_updates_coverage_state():
     app = run_page()
-    next(b for b in app.button if "Predict fire risk" in b.label).click().run()
+    app.session_state["app_level"] = "dashboard"
+    app.run()
+
+    app.number_input(key="coord_input_lat").set_value(38.0).run()
+
     assert not app.exception, app.exception
-
-    rendered = "\n".join(item.value for item in app.markdown)
-    match = re.search(r'class="fwx-prob"[^>]*>([\d.]+)%', rendered)
-    assert match, "probability headline not found"
-    original = match.group(1)
-
-    # Edit one weather input without pressing Predict again.
-    app.number_input[2].set_value(45.0).run()
-    assert not app.exception, app.exception
-
-    rendered = "\n".join(item.value for item in app.markdown)
-    warnings = " ".join(item.value for item in app.warning)
-    assert "Inputs changed since this prediction" in warnings
-    assert "Predict fire risk" in warnings
-    # The displayed score must not silently drift with the edited input.
-    match = re.search(r'class="fwx-prob"[^>]*>([\d.]+)%', rendered)
-    assert match and match.group(1) == original
+    assert app.session_state["active_click"][0] == pytest.approx(38.0)
+    rendered = " ".join(item.value for item in app.html)
+    assert "❌ Hors maillage" in rendered
+    assert any("Prédiction désactivée" in button.label for button in app.button)
 
 
-def test_result_offers_a_json_export_and_share_panel():
-    app = run_page()
-    next(b for b in app.button if "Predict fire risk" in b.label).click().run()
-    assert not app.exception, app.exception
-
-    labels = [expander.label for expander in app.expander]
-    assert any("Share, bookmark or export" in label for label in labels)
-
-    downloads = [button.label for button in app.download_button]
-    assert any("Download prediction as JSON" in label for label in downloads)
-    # The export must point at a real media payload, not an empty placeholder.
-    assert app.download_button[0].proto.url.endswith(".json")
+def test_deployed_model_contract_remains_twenty_features():
+    assert BUNDLE.status == "REAL"
+    assert len(CARD["feature_names"]) == 20
+    assert len(MODEL_FEATURES) == 20
+    assert CARD["risk_bins"] == [0, 0.005, 0.02, 0.06, 1.0]
+    assert CARD["risk_labels"] == ["LOW", "MODERATE", "HIGH", "VERY HIGH"]
 
 
 # ---------------------------------------------------------------------------
@@ -433,13 +408,3 @@ def test_metric_drift_flags_only_real_changes():
     assert not indexed.loc["Base fire rate", "changed"]
     assert indexed.loc["Precision-Recall AUC", "model_card"] == "0.1582"
     assert indexed.loc["Precision-Recall AUC", "reproducible"] == "0.2441"
-
-
-def test_landing_page_explains_metric_drift():
-    app = run_page()
-
-    assert not app.exception, app.exception
-    tables = [frame.value for frame in app.dataframe]
-    assert any("Model card snapshot" in list(table.columns) for table in tables)
-    captions = " ".join(item.value for item in app.caption)
-    assert "deployed model is unchanged" in captions

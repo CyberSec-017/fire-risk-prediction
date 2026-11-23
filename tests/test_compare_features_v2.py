@@ -276,6 +276,22 @@ class TestSyntheticComparisonPipeline(unittest.TestCase):
         # All PR-AUCs must be in [0, 1]
         self.assertTrue(((results["pr_auc"] >= 0.0) & (results["pr_auc"] <= 1.0)).all())
 
+    def test_optional_experimental_pipeline_is_behaviour_neutral(self):
+        """The opt-in ColumnTransformer wrapper must not change experiment metrics."""
+        base = HistGradientBoostingClassifier(max_iter=5, max_depth=3, random_state=42)
+        raw = run_single_experiment(
+            "A_baseline", self.train_df, self.val_df,
+            model=base, n_splits=2, purge_days=1, random_state=42
+        )
+        piped = run_single_experiment(
+            "A_baseline", self.train_df, self.val_df,
+            model=base, n_splits=2, purge_days=1, random_state=42,
+            use_pipeline=True,
+        )
+
+        for key in ("pr_auc", "roc_auc", "brier_score", "threshold_oof", "f1_score"):
+            self.assertAlmostEqual(raw[key], piped[key], places=12)
+
     def test_reproducibility(self):
         """Running the same config with the same random_state must yield identical metrics."""
         fast_clf1 = HistGradientBoostingClassifier(max_iter=5, max_depth=3, random_state=42)

@@ -11,6 +11,17 @@ from __future__ import annotations
 import textwrap
 import streamlit as st
 
+from dashboard.data_quality_view import (
+    build_pipeline_quality_reports,
+    render_data_quality_summary,
+)
+
+
+@st.cache_data(show_spinner=False)
+def _cached_quality_reports():
+    """Read and profile pipeline datasets once per Streamlit session cache."""
+    return build_pipeline_quality_reports()
+
 
 def render_v2_sidebar() -> None:
     """Render the refined dark enterprise sidebar identity for V2."""
@@ -36,3 +47,10 @@ def render_v2_sidebar() -> None:
                 """
             )
         )
+
+        if st.checkbox("Qualité des données", key="show_data_quality"):
+            render_data_quality_summary(
+                _cached_quality_reports(),
+                title="Rapport qualité des données",
+                expanded=True,
+            )

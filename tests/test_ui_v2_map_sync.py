@@ -27,7 +27,7 @@ from ui_v2.components.satellite_map import build_satellite_map
 from ui_v2.components.point_context import is_point_in_active_cells, get_wilaya_and_region
 from ui_v2.dashboard_view import extract_folium_click
 
-APP_PATH = ROOT / "app_v2.py"
+APP_PATH = ROOT / "app.py"
 
 
 class MockSessionState(dict):

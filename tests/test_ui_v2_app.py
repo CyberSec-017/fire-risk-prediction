@@ -19,7 +19,7 @@ if str(ROOT) not in sys.path:
 
 from streamlit.testing.v1 import AppTest
 
-APP_PATH = ROOT / "app_v2.py"
+APP_PATH = ROOT / "app.py"
 
 
 def test_app_v2_initial_load_shows_landing_page():

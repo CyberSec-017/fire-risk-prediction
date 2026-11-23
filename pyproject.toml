@@ -4,8 +4,13 @@ version = "0.1.0"
 description = "Wildfire risk prediction, geospatial monitoring and impact assessment for northern Algeria."
 readme = "README.md"
 requires-python = ">=3.11"
-authors = [{ name = "CyberSec-017", email = "notskyzzo@gmail.com" },{ name = "SIAD02", email = "abdellahachika@gmail.com
-" },{ name = "SIAD12", email = "aymenkebbas45@gmail.com" },{ name = "RSD003", email = "tttrr9576@gmail.com" },{ name = "SIAD04", email = "ahmedwassim.aoutti@gmail.com" }]
+authors = [
+    { name = "CyberSec-017", email = "notskyzzo@gmail.com" },
+    { name = "SIAD02", email = "abdellahachika@gmail.com" },
+    { name = "SIAD12", email = "aymenkebbas45@gmail.com" },
+    { name = "RSD003", email = "tttrr9576@gmail.com" },
+    { name = "SIAD04", email = "ahmedwassim.aoutti@gmail.com" },
+]
 keywords = ["wildfire", "risk", "nasa-firms", "nasa-power", "streamlit", "machine-learning"]
 classifiers = [
     "Environment :: Science/Research",
@@ -20,4 +25,9 @@ classifiers = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra"
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-ra --strict-markers --strict-config"
+xfail_strict = true
+console_output_style = "count"

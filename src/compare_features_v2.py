@@ -43,6 +43,7 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
+from sklearn.pipeline import Pipeline
 
 # Ensure src/ is on sys.path
 ROOT = Path(__file__).resolve().parent.parent
@@ -56,6 +57,7 @@ from compare_classifiers import (
     RESULTS_DIR,
     find_optimal_threshold_oof,
 )
+from experimental_pipeline import build_experimental_pipeline
 from features_v2 import ALL_NEW_FEATURES, FEATURE_FAMILIES, build_features_v2
 from train_baseline import EXCLUDE_COLS, LABEL, VAL_YEAR
 from tune_classifiers import build_tuning_date_folds, get_tuning_classifiers
@@ -281,6 +283,7 @@ def run_single_experiment(
     n_splits: int = 5,
     purge_days: int = PURGE_DAYS,
     random_state: int = 42,
+    use_pipeline: bool = False,
 ) -> dict[str, Any]:
     """Run an isolated experiment for one feature configuration.
 
@@ -292,6 +295,9 @@ def run_single_experiment(
       5. Fit model on full Train.
       6. Predict probabilities on Validation.
       7. Evaluate PR-AUC, ROC-AUC, Brier score, Precision, Recall, F1 on Validation.
+    ``use_pipeline=True`` wraps the estimator in the experimental
+    ColumnTransformer/passthrough pipeline; the default keeps the historical raw
+    DataFrame behaviour and never touches the deployed model.
     """
     if config_key not in EXPERIMENT_CONFIGS:
         raise ValueError(f"Unknown config_key '{config_key}'")
@@ -310,6 +316,10 @@ def run_single_experiment(
     y_val = val_df[LABEL].to_numpy(dtype=int)
 
     clf = model if model is not None else get_tuned_hgb_model(random_state=random_state)
+    if use_pipeline and not isinstance(clf, Pipeline):
+        # Opt-in only: explicit numeric schema, passthrough preprocessing for
+        # HistGradientBoosting. Production inference never uses this wrapper.
+        clf = build_experimental_pipeline(clf, features=features)
 
     t0 = time.time()
     # Step 1: Compute OOF threshold on Train
