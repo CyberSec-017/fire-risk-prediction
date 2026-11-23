@@ -38,6 +38,11 @@ PAGE_CONFIGS = [
         "description": "Historique des détections feux NASA FIRMS (2018–2022)",
     },
     {
+        "id": "eda",
+        "label": "📈 Données & EDA",
+        "description": "Qualité des données et exploration interactive des observations (15 graphiques)",
+    },
+    {
         "id": "about",
         "label": "ℹ️ Méthodologie",
         "description": "Protocole scientifique, sources de données et modèle",

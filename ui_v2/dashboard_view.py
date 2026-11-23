@@ -143,7 +143,7 @@ def render_dashboard() -> None:
         )
 
     with col_b2:
-        col_sub1, col_sub2 = st.columns([1.2, 1.0], vertical_alignment="center")
+        col_sub1, col_sub2, col_sub3 = st.columns([1.0, 1.2, 0.9], vertical_alignment="center")
         with col_sub1:
             st.html(
                 textwrap.dedent(
@@ -156,6 +156,11 @@ def render_dashboard() -> None:
                 )
             )
         with col_sub2:
+            if st.button("📈 Données & EDA", type="secondary", use_container_width=True, key="btn_open_eda"):
+                st.session_state["app_level"] = "eda"
+                st.rerun()
+
+        with col_sub3:
             if st.button("← Accueil", type="secondary", use_container_width=True, key="btn_return_landing"):
                 st.session_state["app_level"] = "landing"
                 st.rerun()

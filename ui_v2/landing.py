@@ -52,6 +52,10 @@ def render_landing_page() -> None:
         if st.button("🚀 Explorer FireWatch AI →", type="primary", use_container_width=True, key="btn_explore_firewatch"):
             st.session_state["app_level"] = "dashboard"
             st.rerun()
+        if st.button("📈 Explorer les données (EDA & qualité)", type="secondary",
+                     use_container_width=True, key="btn_explore_eda"):
+            st.session_state["app_level"] = "eda"
+            st.rerun()
 
     # -------------------------------------------------------------------------
     # Three Pillars of Environmental Intelligence
