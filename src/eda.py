@@ -53,6 +53,9 @@ _MONTH_TO_SEASON = {
     6: "JJA (été)", 7: "JJA (été)", 8: "JJA (été)",
     9: "SON (automne)", 10: "SON (automne)", 11: "SON (automne)",
 }
+# Public alias reused by the statistical-validation module so season labels
+# stay identical between the EDA charts and the hypothesis tests.
+MONTH_TO_SEASON = dict(_MONTH_TO_SEASON)
 
 LATITUDE_BANDS = (
     ("Nord côtier (< 34°N)", -np.inf, 34.0),

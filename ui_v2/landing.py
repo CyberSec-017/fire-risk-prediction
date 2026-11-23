@@ -56,6 +56,10 @@ def render_landing_page() -> None:
                      use_container_width=True, key="btn_explore_eda"):
             st.session_state["app_level"] = "eda"
             st.rerun()
+        if st.button("🧪 Validation statistique & benchmark", type="secondary",
+                     use_container_width=True, key="btn_explore_statistics"):
+            st.session_state["app_level"] = "statistics"
+            st.rerun()
 
     # -------------------------------------------------------------------------
     # Three Pillars of Environmental Intelligence

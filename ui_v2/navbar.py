@@ -2,7 +2,7 @@
 
 Provides:
   - Brand header with FireWatch AI identity and model status.
-  - Horizontal tab-style navigation between all 6 platform pages.
+  - Horizontal tab-style navigation between all platform pages.
   - Synchronization with st.session_state["current_page"].
 """
 
@@ -41,6 +41,11 @@ PAGE_CONFIGS = [
         "id": "eda",
         "label": "📈 Données & EDA",
         "description": "Qualité des données et exploration interactive des observations (15 graphiques)",
+    },
+    {
+        "id": "statistics",
+        "label": "🧪 Statistiques & benchmark",
+        "description": "Tests d'hypothèses et comparaison des modèles sur le même découpage",
     },
     {
         "id": "about",

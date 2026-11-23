@@ -1,0 +1,95 @@
+{
+  "generated_at": "2026-11-23T17:55:18.002805+00:00",
+  "seed": 42,
+  "model_contract": {
+    "n_features": 20,
+    "features": [
+      "lat_cell",
+      "lon_cell",
+      "T2M",
+      "T2M_MAX",
+      "RH2M",
+      "WS2M",
+      "PRECTOTCORR",
+      "GWETROOT",
+      "rain_7d",
+      "tmax_7d",
+      "rhmin_7d",
+      "rain_14d",
+      "tmax_14d",
+      "rhmin_14d",
+      "rain_30d",
+      "tmax_30d",
+      "rhmin_30d",
+      "dry_days",
+      "doy_sin",
+      "doy_cos"
+    ],
+    "artifacts_modified": false,
+    "note": "models/fire_model.joblib et models/model_card.json n'ont pas été modifiés."
+  },
+  "split": {
+    "strategy": "temporal, cell-day atomic, no random split",
+    "train_rows": 292182,
+    "val_rows": 75658,
+    "train_date_min": "2018-03-02",
+    "train_date_max": "2021-12-28",
+    "val_date_min": "2022-01-01",
+    "val_date_max": "2022-12-28",
+    "purge_days": 3,
+    "oof_folds": "3 chronological expanding date blocks; first block is warm-up",
+    "test_set": "2023–2024 untouched by these experiments"
+  },
+  "class_balance": {
+    "train_positive_rate": 0.055574949860018756,
+    "val_positive_rate": 0.04752967300219409,
+    "val_positive_rows": 3596
+  },
+  "preprocessing": "Pipeline identique par famille : imputation médiane et standardisation uniquement lorsque l'estimateur l'exige ; HistGradientBoosting reçoit les NaN nativement.",
+  "threshold_policy": {
+    "primary": "F1 threshold learned from train out-of-fold predictions only",
+    "tuned_reference": "F1 threshold fitted on validation; thresholded metrics excluded from ranking"
+  },
+  "algorithms": {
+    "included": [
+      "DummyClassifier (prior) — simple baseline",
+      "LogisticRegression — linear baseline",
+      "DecisionTreeClassifier — tree baseline",
+      "RandomForestClassifier — bagged trees",
+      "HistGradientBoostingClassifier — gradient boosting",
+      "KNeighborsClassifier — neighbors",
+      "GaussianNB — probabilistic baseline"
+    ],
+    "excluded": {
+      "XGBoost": {
+        "available": false,
+        "module": "xgboost",
+        "status": "not installed",
+        "reason": "Dépendance absente de l'environnement et non épinglée dans requirements.txt : aucun résultat n'est rapporté."
+      },
+      "LightGBM": {
+        "available": false,
+        "module": "lightgbm",
+        "status": "not installed",
+        "reason": "Dépendance absente de l'environnement et non épinglée dans requirements.txt : aucun résultat n'est rapporté."
+      },
+      "CatBoost": {
+        "available": false,
+        "module": "catboost",
+        "status": "not installed",
+        "reason": "Dépendance absente de l'environnement et non épinglée dans requirements.txt : aucun résultat n'est rapporté."
+      }
+    }
+  },
+  "archived_sources": [
+    "classifier_comparison.csv",
+    "tuned_classifier_comparison.csv",
+    "computed: DummyClassifier(strategy='prior') on the identical split"
+  ],
+  "interpretation_notes": [
+    "PR-AUC : aire sous la courbe précision-rappel ; la référence aléatoire vaut le taux de positifs de la validation, pas 0,5. C'est le critère principal pour un événement rare.",
+    "ROC-AUC : capacité de classement toutes seuils confondus ; elle peut paraître élevée même quand la précision reste faible en cas de déséquilibre fort.",
+    "Accuracy : trompeuse ici — prédire « aucun feu » pour toutes les cellules donne déjà plus de 95 % de bonnes réponses. Elle ne doit pas guider le choix du modèle.",
+    "Les métriques au seuil optimal des modèles non réglés utilisent un seuil appris uniquement sur les prédictions hors-pli du train ; la validation reste extérieure."
+  ]
+}

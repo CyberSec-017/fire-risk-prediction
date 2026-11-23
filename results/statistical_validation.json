@@ -1,0 +1,382 @@
+{
+  "generated_at": "2026-11-23T17:55:17.621133+00:00",
+  "protocol": {
+    "alpha": 0.05,
+    "seed": 42,
+    "shapiro_sample_cap": 5000,
+    "scope": "Tests descriptifs sur les observations historiques (NASA POWER + proxy FIRMS). Aucune donnée prédite ni aucune surface brûlée confirmée n'est utilisée."
+  },
+  "dataset": {
+    "rows": 521246,
+    "cells": 209,
+    "date_min": "2018-03-02",
+    "date_max": "2024-12-28",
+    "detected_cell_days": 11247,
+    "detection_rate": 0.021577143997268084,
+    "tested_variable": {
+      "column": "T2M_MAX",
+      "label": "Température maximale à 2 m",
+      "unit": "°C"
+    }
+  },
+  "tests": [
+    {
+      "test_id": "chi2_season_detection",
+      "title": "Test du χ² — saison et détection FIRMS",
+      "question": "La fréquence de détection FIRMS dépend-elle de la saison météorologique ?",
+      "null_hypothesis": "H0 : la saison et la présence d'une détection sont indépendantes.",
+      "alternative_hypothesis": "H1 : la fréquence de détection diffère selon la saison.",
+      "why_appropriate": "Les deux variables sont catégorielles (4 saisons × détection oui/non) et les effectifs attendus sont vérifiés avant interprétation.",
+      "alpha": 0.05,
+      "status": "ok",
+      "statistic": 2514.6158790848376,
+      "p_value": 0.0,
+      "p_display": "< 1e-300",
+      "significant": true,
+      "effect_size": {
+        "name": "V de Cramér",
+        "value": 0.06945675018232926,
+        "magnitude": "modérée"
+      },
+      "sample": {
+        "rows": 521246,
+        "degrees_of_freedom": 3
+      },
+      "assumptions": [
+        {
+          "name": "Effectifs attendus ≥ 5",
+          "passed": true,
+          "detail": "Effectif attendu minimal : 2570.5."
+        },
+        {
+          "name": "Observations indépendantes",
+          "passed": null,
+          "detail": "Non vérifiable automatiquement : les cellules-jours se répètent dans l'espace et le temps."
+        }
+      ],
+      "interpretation": "Le test compare les fréquences observées de détection entre saisons. V de Cramér = 0.069 (modérée). Une association saisonnière n'établit pas de lien de causalité.",
+      "contingency": {
+        "rows": [
+          "DJF (hiver)",
+          "MAM (printemps)",
+          "JJA (été)",
+          "SON (automne)"
+        ],
+        "columns": [
+          "0",
+          "1"
+        ],
+        "counts": [
+          [
+            117726,
+            1404
+          ],
+          [
+            132788,
+            1599
+          ],
+          [
+            129800,
+            4796
+          ],
+          [
+            129685,
+            3448
+          ]
+        ],
+        "detection_rates": [
+          0.011785444472425083,
+          0.011898472322471668,
+          0.035632559660019616,
+          0.02589891311695823
+        ],
+        "expected_min": 2570.4851643945467
+      },
+      "group_summaries": [],
+      "histogram": null,
+      "warning": null
+    },
+    {
+      "test_id": "kruskal_tmax_by_season",
+      "title": "Test de Kruskal-Wallis — température maximale par saison",
+      "question": "La distribution de T2M_MAX diffère-t-elle entre les quatre saisons ?",
+      "null_hypothesis": "H0 : les distributions de T2M_MAX sont identiques dans toutes les saisons.",
+      "alternative_hypothesis": "H1 : au moins une saison a une distribution de T2M_MAX différente.",
+      "why_appropriate": "T2M_MAX est une variable continue non normale (voir Shapiro) et les quatre saisons sont des groupes indépendants au sens du protocole ; le test de rang évite l'hypothèse de normalité requise par l'ANOVA.",
+      "alpha": 0.05,
+      "status": "ok",
+      "statistic": 298379.3919881786,
+      "p_value": 0.0,
+      "p_display": "< 1e-300",
+      "significant": true,
+      "effect_size": {
+        "name": "epsilon²",
+        "value": 0.5724335183814401,
+        "magnitude": "très importante"
+      },
+      "sample": {
+        "groups": 4,
+        "rows": 521246
+      },
+      "assumptions": [
+        {
+          "name": "Échantillon suffisant par groupe",
+          "passed": true,
+          "detail": "Effectif minimal : 119,130 (seuil 3)."
+        },
+        {
+          "name": "Mesures continues et groupes comparables",
+          "passed": true,
+          "detail": "T2M_MAX est une température (°C) mesurée de la même manière dans chaque saison."
+        },
+        {
+          "name": "Indépendance des groupes",
+          "passed": null,
+          "detail": "Les saisons sont distinctes, mais la répétition spatiale/temporelle reste une limite."
+        }
+      ],
+      "interpretation": "Le test compare les rangs de température entre saisons (DJF (hiver) 16.4 °C, MAM (printemps) 22.7 °C, JJA (été) 36.9 °C, SON (automne) 25.5 °C). epsilon² = 0.572 (très importante) : il mesure la part de variation de rang expliquée par la saison, pas une cause.",
+      "contingency": null,
+      "group_summaries": [
+        {
+          "group": "DJF (hiver)",
+          "n": 119130,
+          "mean": 16.343529001930662,
+          "std": 3.7022385997165945,
+          "q1": 14.2,
+          "median": 16.36,
+          "q3": 18.69,
+          "min": 1.12,
+          "max": 29.59
+        },
+        {
+          "group": "MAM (printemps)",
+          "n": 134387,
+          "mean": 23.322782635225135,
+          "std": 6.3386694691868914,
+          "q1": 18.32,
+          "median": 22.7,
+          "q3": 27.8,
+          "min": 2.35,
+          "max": 43.77
+        },
+        {
+          "group": "JJA (été)",
+          "n": 134596,
+          "mean": 35.50098524473238,
+          "std": 6.465047764653775,
+          "q1": 30.75,
+          "median": 36.91,
+          "q3": 40.29,
+          "min": 18.2,
+          "max": 51.72
+        },
+        {
+          "group": "SON (automne)",
+          "n": 133133,
+          "mean": 26.060802430652053,
+          "std": 6.583012801690333,
+          "q1": 21.44,
+          "median": 25.54,
+          "q3": 30.51,
+          "min": 4.05,
+          "max": 46.67
+        }
+      ],
+      "histogram": null,
+      "warning": null
+    },
+    {
+      "test_id": "shapiro_tmax_normality",
+      "title": "Test de Shapiro-Wilk — normalité de T2M_MAX",
+      "question": "La distribution observée de T2M_MAX est-elle compatible avec une loi normale ?",
+      "null_hypothesis": "H0 : les valeurs échantillonnées proviennent d'une distribution normale.",
+      "alternative_hypothesis": "H1 : la distribution s'écarte de la normalité.",
+      "why_appropriate": "Shapiro-Wilk est conçu pour une variable continue et ici un échantillon aléatoire reproductible de 5 000 valeurs maximum : sur 500 000 cellules-jours, le test complet serait surpuissant et coûteux.",
+      "alpha": 0.05,
+      "status": "ok",
+      "statistic": 0.9704581881470746,
+      "p_value": 6.649158743016464e-31,
+      "p_display": "6.65e-31",
+      "significant": true,
+      "effect_size": null,
+      "sample": {
+        "input_rows": 521246,
+        "tested_rows": 5000,
+        "sampling": "aléatoire sans remplacement",
+        "seed": 42,
+        "cap": 5000
+      },
+      "assumptions": [
+        {
+          "name": "Taille compatible avec Shapiro-Wilk",
+          "passed": true,
+          "detail": "5,000 valeurs testées (plafond recommandé 5,000)."
+        },
+        {
+          "name": "Valeurs continues et finies",
+          "passed": true,
+          "detail": "Les valeurs manquantes et infinies sont exclues avant échantillonnage."
+        },
+        {
+          "name": "Indépendance des observations",
+          "passed": null,
+          "detail": "L'échantillonnage est aléatoire mais les cellules-jours restent corrélées."
+        }
+      ],
+      "interpretation": "W mesure la similarité avec une droite quantile-quantile normale. Avec un grand effectif, un écart même faible peut être détecté : ce test justifie le choix de tests de rangs plutôt qu'une preuve d'absence de normalité.",
+      "contingency": null,
+      "group_summaries": [],
+      "histogram": {
+        "bin_centers": [
+          5.027749999999999,
+          7.32325,
+          9.618749999999999,
+          11.91425,
+          14.209749999999998,
+          16.505249999999997,
+          18.800749999999997,
+          21.096249999999998,
+          23.391749999999995,
+          25.68725,
+          27.982749999999996,
+          30.278249999999993,
+          32.57375,
+          34.869249999999994,
+          37.16475,
+          39.46025,
+          41.75574999999999,
+          44.051249999999996,
+          46.34675,
+          48.64225
+        ],
+        "observed_counts": [
+          9,
+          25,
+          57,
+          146,
+          355,
+          533,
+          513,
+          445,
+          429,
+          445,
+          376,
+          284,
+          266,
+          265,
+          270,
+          244,
+          189,
+          92,
+          47,
+          10
+        ],
+        "normal_expected_counts": [
+          38.30992142106669,
+          65.9013804961217,
+          106.3367249832803,
+          160.94502848079102,
+          228.49535128703263,
+          304.2865027775867,
+          380.09619845842934,
+          445.35863833097244,
+          489.47639425637755,
+          504.61382063310975,
+          487.96879148174907,
+          442.61942588572805,
+          376.59487987142916,
+          300.55493888970744,
+          224.9980965117459,
+          157.9935422819102,
+          104.06515748073708,
+          64.29495142046069,
+          37.26094940546602,
+          20.255197290904576
+        ],
+        "unit": "°C",
+        "note": "La courbe normale est ajustée à l'échantillon : elle sert d'illustration, pas de test visuel."
+      },
+      "warning": null
+    },
+    {
+      "test_id": "mannwhitney_tmax_by_detection",
+      "title": "Test de Mann-Whitney U — température et détection",
+      "question": "T2M_MAX se répartit-elle différemment selon la présence d'une détection FIRMS ?",
+      "null_hypothesis": "H0 : les deux distributions de T2M_MAX ont la même position (stochastiquement identiques).",
+      "alternative_hypothesis": "H1 : une des deux groupes présente des valeurs de T2M_MAX plus élevées.",
+      "why_appropriate": "Deux groupes de tailles très inégales, une variable continue non normale et un grand effectif : le test de rang non paramétrique est adapté, contrairement au t de Student.",
+      "alpha": 0.05,
+      "status": "ok",
+      "statistic": 2107413300.5,
+      "p_value": 0.0,
+      "p_display": "< 1e-300",
+      "significant": true,
+      "effect_size": {
+        "name": "rang-bisérial",
+        "value": -0.26519231003961163,
+        "magnitude": "très importante"
+      },
+      "sample": {
+        "group_a_rows": 509999,
+        "group_b_rows": 11247
+      },
+      "assumptions": [
+        {
+          "name": "Deux échantillons exploitables",
+          "passed": true,
+          "detail": "509,999 et 11,247 valeurs finies."
+        },
+        {
+          "name": "Variable continue comparable",
+          "passed": true,
+          "detail": "La même variable T2M_MAX (°C) est mesurée dans les deux groupes."
+        },
+        {
+          "name": "Forme des distributions",
+          "passed": null,
+          "detail": "L'interprétation porte sur les rangs ; elle n'implique pas une différence de médiane si les formes diffèrent."
+        },
+        {
+          "name": "Indépendance des observations",
+          "passed": null,
+          "detail": "Les cellules-jours sont corrélées dans l'espace et le temps ; prudence sur la significativité."
+        }
+      ],
+      "interpretation": "Médianes observées : sans détection 24.3 °C, avec détection 30.0 °C ; le rang-bisérial négatif indique des températures plus élevées les jours avec détection. U compare les rangs, pas les moyennes ; l'effet est une association observée, pas une cause.",
+      "contingency": null,
+      "group_summaries": [
+        {
+          "group": "groupe 0 (sans détection)",
+          "n": 509999,
+          "mean": 25.488389232135752,
+          "std": 9.040912425589953,
+          "q1": 18.08,
+          "median": 24.27,
+          "q3": 32.34,
+          "min": 1.12,
+          "max": 51.72
+        },
+        {
+          "group": "groupe 1 (avec détection)",
+          "n": 11247,
+          "mean": 29.347719391837828,
+          "std": 7.910065242214125,
+          "q1": 23.59,
+          "median": 29.98,
+          "q3": 35.62,
+          "min": 2.49,
+          "max": 49.06
+        }
+      ],
+      "histogram": null,
+      "warning": null
+    }
+  ],
+  "limitations": [
+    "Les cellules-jours répètent les mêmes cellules et des jours consécutifs : l'indépendance stricte des observations n'est pas garantie, donc les p-valeurs sont à lire comme des indicateurs descriptifs et non comme une preuve causale.",
+    "Un résultat statistiquement significatif n'implique pas un effet important pour la décision opérationnelle ; l'ampleur de l'effet et le contexte comptent.",
+    "Une performance de validation, même bonne, ne garantit pas la performance réelle d'un modèle de prévision des feux de forêt.",
+    "Le proxy « burned » désigne une cellule-jour avec au moins une détection FIRMS ; ce n'est ni une surface brûlée confirmée ni un dégât matériel."
+  ]
+}
