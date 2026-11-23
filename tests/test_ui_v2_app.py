@@ -1,4 +1,4 @@
-"""AppTest integration tests for app_v2.py (FireWatch AI UI V2).
+"""AppTest integration tests for the UI V2 entry point in app.py.
 
 Validates:
   - Initial startup renders the Level 1 Welcome & Landing page ("Understand. Monitor. Predict.").

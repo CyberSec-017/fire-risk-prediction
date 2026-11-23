@@ -14,7 +14,7 @@ Why a script instead of a .ipynb?
 It runs headless in CI, it is diff-able in Git, and every number in the PDF
 report can be regenerated with one command:
 
-    python notebook.py
+    python report/notebook.py
 
 Outputs
 -------
@@ -846,7 +846,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
         "## Reproduce",
         "",
         "```bash",
-        "python notebook.py",
+        "python report/notebook.py",
         "```",
         "",
         "Figures are written to `report/figures/`, the machine-readable summary to",

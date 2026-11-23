@@ -48,6 +48,11 @@ PAGE_CONFIGS = [
         "description": "Tests d'hypothèses et comparaison des modèles sur le même découpage",
     },
     {
+        "id": "batch",
+        "label": "📄 Inférence CSV",
+        "description": "Scoring par lots avec validation stricte et export des résultats",
+    },
+    {
         "id": "about",
         "label": "ℹ️ Méthodologie",
         "description": "Protocole scientifique, sources de données et modèle",

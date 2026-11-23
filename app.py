@@ -32,6 +32,7 @@ if CSS_FILE.exists():
 
 from ui_v2.dashboard_view import render_dashboard
 from ui_v2.landing import render_landing_page
+from ui_v2.pages.batch import render_page as render_batch_page
 from ui_v2.pages.eda import render_page as render_eda_page
 from ui_v2.pages.statistics import render_page as render_statistics_page
 from ui_v2.sidebar import render_v2_sidebar
@@ -54,6 +55,8 @@ def main() -> None:
         render_eda_page()
     elif level == "statistics":
         render_statistics_page()
+    elif level == "batch":
+        render_batch_page()
     else:
         render_landing_page()
 

@@ -49,16 +49,20 @@ def render_landing_page() -> None:
     # -------------------------------------------------------------------------
     col_l, col_btn, col_r = st.columns([1.2, 1.6, 1.2])
     with col_btn:
-        if st.button("🚀 Explorer FireWatch AI →", type="primary", use_container_width=True, key="btn_explore_firewatch"):
+        if st.button("🚀 Explorer FireWatch AI →", type="primary", width="stretch", key="btn_explore_firewatch"):
             st.session_state["app_level"] = "dashboard"
             st.rerun()
         if st.button("📈 Explorer les données (EDA & qualité)", type="secondary",
-                     use_container_width=True, key="btn_explore_eda"):
+                     width="stretch", key="btn_explore_eda"):
             st.session_state["app_level"] = "eda"
             st.rerun()
         if st.button("🧪 Validation statistique & benchmark", type="secondary",
-                     use_container_width=True, key="btn_explore_statistics"):
+                     width="stretch", key="btn_explore_statistics"):
             st.session_state["app_level"] = "statistics"
+            st.rerun()
+        if st.button("📄 Inférence par lots (CSV)", type="secondary",
+                     width="stretch", key="btn_explore_batch"):
+            st.session_state["app_level"] = "batch"
             st.rerun()
 
     # -------------------------------------------------------------------------
